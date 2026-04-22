@@ -5,10 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Dashboard IVR Consulta de Placa</title>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;700&family=IBM+Plex+Sans:wght@400;600;800&display=swap" rel="stylesheet" />
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/recharts/2.12.7/Recharts.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+  <!-- React -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <!-- Recharts deps -->
+  <script src="https://unpkg.com/prop-types@15/prop-types.min.js"></script>
+  <script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
+  <!-- Babel -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: 'IBM Plex Sans', 'Segoe UI', sans-serif; background: #f0f4f9; color: #1e3a5f; }
@@ -25,12 +29,14 @@
   <div id="root"></div>
   <script type="text/babel">
     const { useState, useEffect, useRef, useCallback } = React;
-    const { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
-            ResponsiveContainer, LineChart, Line, PieChart, Pie, Cell, ComposedChart } = Recharts;
+    const {
+      BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+      ResponsiveContainer, LineChart, Line, PieChart, Pie, Cell, ComposedChart
+    } = Recharts;
 
     const C = {
       navy: "#1e3a5f", navyMid: "#2a5298", navyLight: "#3d72c4",
-      orange: "#e05c2a", orangeMid: "#f08040",
+      orange: "#e05c2a",
       bg: "#f0f4f9", white: "#ffffff", border: "#e8eef6", borderLight: "#eef2f7",
       textMuted: "#8a94a6", textSub: "#5a7a9f",
       green: "#2ecc71", greenBg: "#edfff4", redBg: "#fff0ed",
@@ -39,6 +45,7 @@
     const FLAG = { PA: "🇵🇦", CR: "🇨🇷" };
     const COUNTRY_NAME = { PA: "Panamá", CR: "Costa Rica" };
     const COUNTRIES = ["PA", "CR"];
+    const FLOW_COLORS = ["#1e3a5f","#3d72c4","#2a5298","#e05c2a","#f08040","#f5aa70","#8a94a6"];
 
     function parseCSV(text) {
       const lines = text.trim().split("\n");
@@ -80,7 +87,10 @@
       const fecha = rows[0]["Fecha"] || "";
 
       const resultados = {};
-      rows.forEach(r => { const k = r["Finalizado"] || "Sin dato"; resultados[k] = (resultados[k] || 0) + 1; });
+      rows.forEach(r => {
+        const k = r["Finalizado"] || "Sin dato";
+        resultados[k] = (resultados[k] || 0) + 1;
+      });
 
       const flowMap = {
         "Cliente identificado por placa": ["suraplate-identified", "suraplateidentified"],
@@ -130,8 +140,10 @@
       const tasaExito = +((enviados / total) * 100).toFixed(1);
       const tasaColgada = +((colgadas / total) * 100).toFixed(1);
 
-      const durColgadas = rows.filter(r => r["Finalizado"] === "Llamada colgada").map(r => parseSec(r["Tiempo total"])).filter(d => d > 0);
-      const avgDurColgadas = durColgadas.length ? (durColgadas.reduce((a, b) => a + b, 0) / durColgadas.length).toFixed(0) : 0;
+      const durColgadas = rows.filter(r => r["Finalizado"] === "Llamada colgada")
+        .map(r => parseSec(r["Tiempo total"])).filter(d => d > 0);
+      const avgDurColgadas = durColgadas.length
+        ? (durColgadas.reduce((a, b) => a + b, 0) / durColgadas.length).toFixed(0) : 0;
 
       return { country, voicebot, fecha, filename, total, flows, avgDur, maxDur, minDur, hourlyData, enviados, colgadas, tasaExito, tasaColgada, avgDurColgadas };
     }
@@ -140,7 +152,7 @@
       return (
         <div style={{ background: C.white, borderRadius: 12, padding: "16px 20px", boxShadow: "0 2px 10px rgba(0,0,0,0.06)", border: "1px solid " + C.borderLight, flex: "1 1 150px", minWidth: 140 }}>
           <div style={{ fontSize: 11, color: C.textMuted, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>{icon} {label}</div>
-          <div style={{ fontSize: 28, fontWeight: 800, color: accent || C.navy, fontFamily: "'IBM Plex Mono', monospace", lineHeight: 1.1 }}>{value}</div>
+          <div style={{ fontSize: 26, fontWeight: 800, color: accent || C.navy, fontFamily: "'IBM Plex Mono', monospace", lineHeight: 1.1 }}>{value}</div>
           {sub && <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>{sub}</div>}
         </div>
       );
@@ -186,6 +198,11 @@
           <div style={{ fontSize: 13, marginTop: 6 }}>Sube un archivo CSV usando el botón de arriba.</div>
         </div>
       );
+
+      const pieData = Object.entries(m.flows).sort((a, b) => b[1] - a[1])
+        .map(([name, value], i) => ({ name, value, color: FLOW_COLORS[i % FLOW_COLORS.length] }));
+      const flowTotal = pieData.reduce((s, d) => s + d.value, 0);
+
       return (
         <div>
           <div style={{ background: "#f0f7ff", borderRadius: 10, padding: "10px 16px", marginBottom: 18, fontSize: 12, color: C.textSub, display: "flex", gap: 24, flexWrap: "wrap" }}>
@@ -194,68 +211,69 @@
             <span>📄 <strong>Archivo:</strong> {m.filename}</span>
             <span>📞 <strong>Total registros:</strong> {m.total}</span>
           </div>
+
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 20 }}>
             <StatCard label="Total Llamadas" value={m.total} icon="📞" />
-            <StatCard label="Llamadas completas por voicebot" value={m.enviados} sub={m.tasaExito + "% del total"} accent={C.navy} icon="✅" />
+            <StatCard label="Llamadas completas" value={m.enviados} sub={m.tasaExito + "% del total"} accent={C.navy} icon="✅" />
             <StatCard label="Llamadas Colgadas" value={m.colgadas} sub={m.tasaColgada + "% del total"} accent={C.orange} icon="📵" />
             <StatCard label="Duración Promedio" value={fmtSec(m.avgDur)} sub={"Mín: " + fmtSec(m.minDur) + " · Máx: " + fmtSec(m.maxDur)} icon="⏱️" />
             <StatCard label="Dur. Prom. Colgadas" value={fmtSec(m.avgDurColgadas)} sub="Promedio llamadas colgadas" accent={C.orange} icon="⏱️" />
           </div>
+
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 18 }}>
+            {/* Donut flujos */}
             <div style={{ background: C.white, borderRadius: 12, padding: "18px 20px", boxShadow: "0 2px 10px rgba(0,0,0,0.06)", border: "1px solid " + C.borderLight }}>
               <div style={{ fontWeight: 700, color: C.navy, marginBottom: 14 }}>📊 Distribución de Flujos de Destino</div>
-              {(() => {
-                const FLOW_COLORS = ["#1e3a5f","#3d72c4","#2a5298","#e05c2a","#f08040","#f5aa70","#8a94a6"];
-                const pd = Object.entries(m.flows).sort((a,b) => b[1]-a[1]).map(([name, value], i) => ({ name, value, color: FLOW_COLORS[i % FLOW_COLORS.length] }));
-                const tot = pd.reduce((s, d) => s + d.value, 0);
-                return (
-                  <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
-                    <div style={{ flexShrink: 0 }}>
-                      <ResponsiveContainer width={180} height={180}>
-                        <PieChart>
-                          <Pie data={pd} cx="50%" cy="50%" innerRadius={45} outerRadius={80} dataKey="value" labelLine={false}>
-                            {pd.map((d, i) => <Cell key={i} fill={d.color} />)}
-                          </Pie>
-                          <Tooltip formatter={(v, name) => [v + " llamadas (" + ((v/tot)*100).toFixed(1) + "%)", name]} />
-                        </PieChart>
-                      </ResponsiveContainer>
+              <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+                <div style={{ flexShrink: 0 }}>
+                  <ResponsiveContainer width={170} height={170}>
+                    <PieChart>
+                      <Pie data={pieData} cx="50%" cy="50%" innerRadius={45} outerRadius={78} dataKey="value" labelLine={false}>
+                        {pieData.map((d, i) => <Cell key={i} fill={d.color} />)}
+                      </Pie>
+                      <Tooltip formatter={(v, name) => [v + " (" + ((v / flowTotal) * 100).toFixed(1) + "%)", name]} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+                <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 5 }}>
+                  {pieData.map((d, i) => (
+                    <div key={i} style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                      <div style={{ width: 9, height: 9, borderRadius: "50%", background: d.color, flexShrink: 0 }} />
+                      <div style={{ flex: 1, fontSize: 10, color: C.textSub, lineHeight: 1.3 }}>{d.name}</div>
+                      <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, fontWeight: 700, color: C.navy, whiteSpace: "nowrap" }}>
+                        {d.value} <span style={{ color: C.textMuted, fontWeight: 400 }}>({((d.value / flowTotal) * 100).toFixed(1)}%)</span>
+                      </div>
                     </div>
-                    <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
-                      {pd.map((d, i) => (
-                        <div key={i} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <div style={{ width: 10, height: 10, borderRadius: "50%", background: d.color, flexShrink: 0 }} />
-                          <div style={{ flex: 1, fontSize: 11, color: C.textSub, lineHeight: 1.3 }}>{d.name}</div>
-                          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, fontWeight: 700, color: C.navy, whiteSpace: "nowrap" }}>
-                            {d.value} <span style={{ color: C.textMuted, fontWeight: 400 }}>({((d.value/tot)*100).toFixed(1)}%)</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })()}
+                  ))}
+                </div>
+              </div>
             </div>
+
+            {/* Llamadas por hora */}
             <div style={{ background: C.white, borderRadius: 12, padding: "18px 20px", boxShadow: "0 2px 10px rgba(0,0,0,0.06)", border: "1px solid " + C.borderLight }}>
               <div style={{ fontWeight: 700, color: C.navy, marginBottom: 14 }}>Llamadas por Hora</div>
-              <ResponsiveContainer width="100%" height={220}>
+              <ResponsiveContainer width="100%" height={210}>
                 <ComposedChart data={m.hourlyData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f0f4f8" />
                   <XAxis dataKey="hora" tick={{ fontSize: 9, fill: C.textMuted }} />
-                  <YAxis yAxisId="left" tick={{ fontSize: 10, fill: C.textMuted }} label={{ value: "Llamadas", angle: -90, position: "insideLeft", fontSize: 9, fill: C.textMuted }} />
-                  <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 10, fill: C.orange }} tickFormatter={v => v + "s"} label={{ value: "Seg.", angle: 90, position: "insideRight", fontSize: 9, fill: C.orange }} />
+                  <YAxis yAxisId="left" tick={{ fontSize: 9, fill: C.textMuted }} />
+                  <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 9, fill: C.orange }} tickFormatter={v => v + "s"} />
                   <Tooltip formatter={(v, name) => {
                     if (name === "durPromedio") return [fmtSec(v), "Dur. promedio"];
                     if (name === "pctColgadas") return [v + "%", "% Colgadas"];
                     return [v, "Llamadas"];
                   }} />
-                  <Legend iconType="circle" iconSize={8} formatter={v => v === "durPromedio" ? "Duración promedio" : v === "pctColgadas" ? "% Colgadas" : "Llamadas"} />
+                  <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 10 }}
+                    formatter={v => v === "durPromedio" ? "Dur. promedio" : v === "pctColgadas" ? "% Colgadas" : "Llamadas"} />
                   <Bar yAxisId="left" dataKey="llamadas" fill={C.navy} radius={[3, 3, 0, 0]} />
-                  <Line yAxisId="right" type="monotone" dataKey="durPromedio" stroke={C.orange} strokeWidth={2} dot={{ r: 3, fill: C.orange }} />
-                  <Line yAxisId="right" type="monotone" dataKey="pctColgadas" stroke="#2ecc71" strokeWidth={2} strokeDasharray="5 3" dot={{ r: 3, fill: "#2ecc71" }} />
+                  <Line yAxisId="right" type="monotone" dataKey="durPromedio" stroke={C.orange} strokeWidth={2} dot={{ r: 2, fill: C.orange }} />
+                  <Line yAxisId="right" type="monotone" dataKey="pctColgadas" stroke="#2ecc71" strokeWidth={2} strokeDasharray="5 3" dot={{ r: 2, fill: "#2ecc71" }} />
                 </ComposedChart>
               </ResponsiveContainer>
             </div>
           </div>
+
+          {/* Tabla detalle */}
           <div style={{ background: C.white, borderRadius: 12, padding: "18px 20px", boxShadow: "0 2px 10px rgba(0,0,0,0.06)", border: "1px solid " + C.borderLight }}>
             <div style={{ fontWeight: 700, color: C.navy, marginBottom: 14 }}>📋 Detalle de Flujos de Destino</div>
             <FlowTable flows={m.flows} total={m.total} />
@@ -351,7 +369,7 @@
         <div>
           {history.length > 1 && (
             <div style={{ background: C.white, borderRadius: 12, padding: "18px 20px", boxShadow: "0 2px 10px rgba(0,0,0,0.06)", border: "1px solid " + C.borderLight, marginBottom: 14 }}>
-              <div style={{ fontWeight: 700, color: C.navy, marginBottom: 14 }}>📈 Tendencia de llamadas — historial de subidas</div>
+              <div style={{ fontWeight: 700, color: C.navy, marginBottom: 14 }}>📈 Tendencia — historial de subidas</div>
               <ResponsiveContainer width="100%" height={200}>
                 <LineChart data={trendData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f0f4f8" />
@@ -371,7 +389,7 @@
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
                 <thead>
                   <tr style={{ background: "#f5f8ff" }}>
-                    {["#", "Fecha", "País", "Archivo", "Voicebot", "Total", "Completas", "Colgadas", "% Éxito"].map(h => (
+                    {["#","Fecha","País","Archivo","Voicebot","Total","Completas","Colgadas","% Éxito"].map(h => (
                       <th key={h} style={{ padding: "8px 12px", textAlign: "left", color: C.textMuted, fontWeight: 600, borderBottom: "1px solid " + C.borderLight, fontSize: 11, whiteSpace: "nowrap" }}>{h}</th>
                     ))}
                   </tr>
@@ -382,13 +400,13 @@
                       <td style={{ padding: "8px 12px", color: C.textMuted }}>{history.length - i}</td>
                       <td style={{ padding: "8px 12px", color: C.textSub }}>{row.fecha}</td>
                       <td style={{ padding: "8px 12px", fontWeight: 700 }}>{FLAG[row.country] || ""} {COUNTRY_NAME[row.country] || row.country}</td>
-                      <td style={{ padding: "8px 12px", color: C.textMuted, fontSize: 11, maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.filename}</td>
+                      <td style={{ padding: "8px 12px", color: C.textMuted, fontSize: 11, maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.filename}</td>
                       <td style={{ padding: "8px 12px", color: C.textMuted, fontSize: 11 }}>{row.voicebot}</td>
                       <td style={{ padding: "8px 12px", fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, color: C.navy }}>{row.total}</td>
                       <td style={{ padding: "8px 12px", fontFamily: "'IBM Plex Mono', monospace", color: C.navy }}>{row.enviados}</td>
                       <td style={{ padding: "8px 12px", fontFamily: "'IBM Plex Mono', monospace", color: C.orange }}>{row.colgadas}</td>
                       <td style={{ padding: "8px 12px" }}>
-                        <span style={{ background: row.tasaExito >= 80 ? C.greenBg : C.redBg, color: row.tasaExito >= 80 ? "#27ae60" : C.orange, borderRadius: 20, padding: "2px 10px", fontSize: 11, fontWeight: 700, fontFamily: "'IBM Plex Mono', monospace" }}>
+                        <span style={{ background: row.tasaExito >= 80 ? C.greenBg : C.redBg, color: row.tasaExito >= 80 ? "#27ae60" : C.orange, borderRadius: 20, padding: "2px 10px", fontSize: 11, fontWeight: 700 }}>
                           {row.tasaExito}%
                         </span>
                       </td>
@@ -426,9 +444,9 @@
         e.target.value = "";
         const text = await file.text();
         const rows = parseCSV(text);
-        if (!rows.length) { setAlert({ type: "error", msg: "El archivo está vacío o no tiene el formato correcto." }); return; }
+        if (!rows.length) { setAlert({ type: "error", msg: "Archivo vacío o formato incorrecto." }); return; }
         const m = deriveMetrics(rows, file.name);
-        if (!m) { setAlert({ type: "error", msg: "No se detectó Panamá (PA) ni Costa Rica (CR) en el campo Voicebot." }); return; }
+        if (!m) { setAlert({ type: "error", msg: "No se detectó PA ni CR en el campo Voicebot." }); return; }
 
         const newMetrics = { ...metrics, [m.country]: m };
         const newHistory = [...history, m];
@@ -441,13 +459,13 @@
           localStorage.setItem("ivr_placa_v1", JSON.stringify({ hist: newHistory, latest }));
         } catch {}
 
-        setAlert({ type: "success", msg: "✅ " + file.name + " cargado — " + m.total + " registros · País: " + FLAG[m.country] + " " + COUNTRY_NAME[m.country] });
+        setAlert({ type: "success", msg: "✅ " + file.name + " — " + m.total + " registros · " + FLAG[m.country] + " " + COUNTRY_NAME[m.country] });
         setTimeout(() => setAlert(null), 5000);
         setTab(m.country);
       }, [history, metrics]);
 
       const clearAll = useCallback(() => {
-        if (!confirm("¿Borrar todo el historial y datos cargados?")) return;
+        if (!confirm("¿Borrar todo el historial?")) return;
         setMetrics({ PA: null, CR: null });
         setHistory([]);
         try { localStorage.removeItem("ivr_placa_v1"); } catch {}
@@ -461,18 +479,17 @@
       ];
 
       return (
-        <div style={{ fontFamily: "'IBM Plex Sans', 'Segoe UI', sans-serif", background: C.bg, minHeight: "100vh", color: C.navy }}>
+        <div style={{ fontFamily: "'IBM Plex Sans','Segoe UI',sans-serif", background: C.bg, minHeight: "100vh" }}>
+          {/* Header */}
           <div style={{ background: C.white, borderBottom: "1px solid " + C.border, padding: "14px 28px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
               <div style={{ background: C.navy, color: "white", borderRadius: 10, width: 44, height: 44, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 14, letterSpacing: "0.05em", flexShrink: 0 }}>IVR</div>
               <div>
                 <div style={{ fontWeight: 800, fontSize: 17, color: C.navy }}>Dashboard IVR Consulta de Placa — 🇵🇦 Panamá · 🇨🇷 Costa Rica</div>
-                <div style={{ fontSize: 12, color: C.textMuted }}>
-                  Voicebot Analytics · {history.length} archivo{history.length !== 1 ? "s" : ""} en historial · {new Date().toLocaleDateString("es-CO", { day: "2-digit", month: "short", year: "numeric" })}
-                </div>
+                <div style={{ fontSize: 12, color: C.textMuted }}>Voicebot Analytics · {history.length} archivo{history.length !== 1 ? "s" : ""} · {new Date().toLocaleDateString("es-CO", { day: "2-digit", month: "short", year: "numeric" })}</div>
               </div>
             </div>
-            <div style={{ display: "flex", gap: 10 }} className="no-print">
+            <div className="no-print" style={{ display: "flex", gap: 10 }}>
               <button onClick={() => fileRef.current.click()} style={{ background: C.navy, color: "white", border: "none", borderRadius: 8, padding: "9px 18px", fontSize: 13, fontWeight: 600 }}>↑ Subir CSV</button>
               <button onClick={() => window.print()} style={{ background: C.navyMid, color: "white", border: "none", borderRadius: 8, padding: "9px 16px", fontSize: 13, fontWeight: 600 }}>⬇ Exportar PDF</button>
               <button onClick={clearAll} style={{ background: C.white, color: C.orange, border: "1px solid " + C.orange, borderRadius: 8, padding: "9px 14px", fontSize: 13 }}>🗑️ Limpiar</button>
@@ -489,7 +506,7 @@
           <div className="no-print" style={{ background: "#fff8f0", borderBottom: "1px solid #fde8d0", padding: "10px 28px", display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
             <span style={{ color: C.orange, fontWeight: 800 }}>●</span>
             <span style={{ color: "#c0520a", fontWeight: 600 }}>Instrucciones:</span>
-            <span style={{ color: "#7a4020" }}>Sube un CSV por país. El país se detecta automáticamente del campo <strong>Voicebot</strong>. El historial se guarda en el navegador.</span>
+            <span style={{ color: "#7a4020" }}>Sube un CSV por país. El país se detecta del campo <strong>Voicebot</strong>. El historial se guarda en el navegador.</span>
           </div>
 
           <div className="no-print" style={{ padding: "16px 28px 0", display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -504,7 +521,7 @@
                   position: "relative", transition: "all 0.15s",
                 }}>
                   {t.label}
-                  {hasData && !["regional", "history"].includes(t.id) && (
+                  {hasData && !["regional","history"].includes(t.id) && (
                     <span style={{ position: "absolute", top: -4, right: -4, width: 8, height: 8, background: C.green, borderRadius: "50%", border: "2px solid " + C.bg }} />
                   )}
                 </button>
@@ -522,7 +539,8 @@
       );
     }
 
-    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+    const root = ReactDOM.createRoot(document.getElementById("root"));
+    root.render(<App />);
   </script>
 </body>
 </html>
