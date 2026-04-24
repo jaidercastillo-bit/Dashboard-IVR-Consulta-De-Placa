@@ -9,7 +9,7 @@
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/prop-types@15/prop-types.min.js"></script>
   <script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.23.5/babel.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: 'IBM Plex Sans', 'Segoe UI', sans-serif; background: #f0f4f9; color: #1e3a5f; }
@@ -22,7 +22,14 @@
   </style>
 </head>
 <body>
-<div id="root"></div>
+<div id="root"><div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;color:#1e3a5f"><div style="text-align:center"><div style="font-size:40px;margin-bottom:12px">⏳</div><div style="font-weight:700;font-size:16px">Cargando dashboard...</div></div></div></div><div id="error-display" style="display:none;padding:20px;background:#fff0ed;color:#c0392b;font-family:monospace;font-size:12px;white-space:pre-wrap"></div>
+<script>
+window.onerror = function(msg, src, line, col, err) {
+  var d = document.getElementById("error-display");
+  if(d) { d.style.display="block"; d.textContent = "Error: " + msg + "\nLine: " + line + "\n" + (err ? err.stack : ""); }
+  document.getElementById("root").innerHTML = '<div style="padding:40px;text-align:center;color:#c0392b"><div style="font-size:32px;margin-bottom:12px">⚠️</div><div style="font-weight:700">Error al cargar el dashboard</div><div style="font-size:13px;margin-top:8px">Abre las herramientas de desarrollador (F12) para ver el detalle</div></div>';
+};
+</script>
 <script type="text/babel">
 const { useState, useEffect, useRef, useCallback } = React;
 const { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -175,7 +182,7 @@ function mergeMetrics(days) {
   const flowDursAcc = {};
   days.forEach(d => {
     Object.entries(d.flows).forEach(([k, v]) => { flows[k] = (flows[k] || 0) + v; });
-    if (d.flowAvgDur) Object.entries(d.flowAvgDur).forEach(([k, v]) => {
+    if (d.flowAvgDur) Object.entries(d.flowAvgDur||{}).forEach(([k, v]) => {
       if (!flowDursAcc[k]) flowDursAcc[k] = [];
       if (v > 0) flowDursAcc[k].push(v);
     });
