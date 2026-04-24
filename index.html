@@ -31,14 +31,16 @@
   </div>
 </div>
 <script>
-window.onerror = function(msg, src, line, col, err) {
-  document.getElementById("root").innerHTML = '<div style="padding:40px;text-align:center;color:#c0392b"><div style="font-size:32px;margin-bottom:12px">&#9888;&#65039;</div><div style="font-weight:700;font-size:16px">Error al cargar</div><pre style="margin-top:12px;font-size:11px;text-align:left;background:#fff0ed;padding:12px;border-radius:8px;overflow:auto">' + msg + '\nLinea: ' + line + '</pre></div>';
+window.onerror = function(msg, src, line) {
+  document.getElementById("root").innerHTML = '<div style="padding:40px;text-align:center;color:#c0392b"><div style="font-size:32px;margin-bottom:12px">&#9888;</div><div style="font-weight:700;font-size:16px">Error al cargar</div><pre style="margin-top:12px;font-size:11px;text-align:left;background:#fff0ed;padding:12px;border-radius:8px;overflow:auto;max-width:600px;margin:12px auto 0">' + msg + '\nLinea: ' + line + '</pre></div>';
 };
 </script>
 <script type="text/babel">
 const { useState, useEffect, useRef, useCallback } = React;
 const { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
         ResponsiveContainer, LineChart, Line, PieChart, Pie, Cell, ComposedChart } = Recharts;
+
+
 const C = {
   navy: "#1e3a5f", navyMid: "#2a5298", navyLight: "#3d72c4",
   orange: "#e05c2a", orangeMid: "#f08040",
@@ -83,6 +85,18 @@ function fmtSec(s) {
   return `${Math.floor(n / 60)}m ${n % 60}s`;
 }
 
+
+// Extract date from filename: supports DD-MM-YYYY, YYYY-MM-DD, DD_MM_YYYY etc.
+function dateFromFilename(filename) {
+  const m =
+    filename.match(/(\d{2})[_-](\d{2})[_-](\d{4})/) ||  // DD-MM-YYYY or DD_MM_YYYY
+    filename.match(/(\d{4})[_-](\d{2})[_-](\d{2})/);     // YYYY-MM-DD
+  if (!m) return null;
+  // If first group is 4 digits it's YYYY-MM-DD
+  if (m[1].length === 4) return `${m[3]}/${m[2]}/${m[1]}`;
+  return `${m[1]}/${m[2]}/${m[3]}`;
+}
+
 // ─── METRICS ─────────────────────────────────────────────────────────────────
 function deriveMetrics(rows, filename) {
   if (!rows.length) return null;
@@ -100,6 +114,9 @@ function deriveMetrics(rows, filename) {
 function deriveDay(rows, filename, country, fecha) {
   const total = rows.length;
   const voicebot = rows[0]["Voicebot"] || "Desconocido";
+  // Override fecha with date from filename if extractable
+  const filenameDate = dateFromFilename(filename);
+  if (filenameDate) fecha = filenameDate;
 
   const resultados = {};
   rows.forEach(r => { const k = r["Finalizado"] || "Sin dato"; resultados[k] = (resultados[k] || 0) + 1; });
@@ -165,7 +182,7 @@ function deriveDay(rows, filename, country, fecha) {
   const avgDurColgadas = durColgadas.length
     ? (durColgadas.reduce((a, b) => a + b, 0) / durColgadas.length).toFixed(0) : 0;
 
-  return { country, voicebot, fecha, filename, total, flows, flowAvgDur, avgDur, maxDur, minDur, hourlyData, enviados, colgadas, tasaExito, tasaColgada, avgDurColgadas };
+  return { country, voicebot, fecha, filename, total, flows, flowAvgDur, avgDur, maxDur, minDur, hourlyData, enviados, colgadas, tasaExito, tasaColgada, avgDurColgadas, _rawRows: rows };
 }
 
 // ─── MERGE (ACUMULADO) ────────────────────────────────────────────────────────
@@ -486,6 +503,515 @@ function RegionalPanel({ metrics }) {
   );
 }
 
+
+// ─── CROSS PANEL ─────────────────────────────────────────────────────────────
+function CrossPanel({ history }) {
+  const [agentRows, setAgentRows]     = useState([]);
+  const [agentFilename, setAgentFilename] = useState("");
+  const [fileType, setFileType]       = useState(null);
+  const [result, setResult]           = useState(null);
+  const [alertMsg, setAlertMsg]       = useState(null);
+  const [dateFilter, setDateFilter]   = useState("all");
+  const fileRef = useRef();
+
+  function toTs(date, time) {
+    try {
+      const [d,m,y] = date.trim().split("/");
+      const [hh,mm,ss] = time.trim().split(":");
+      return new Date(+y,+m-1,+d,+hh,+mm,+ss).getTime()/1000;
+    } catch { return 0; }
+  }
+
+  function detectFileType(rows) {
+    if (!rows.length) return null;
+    const h = Object.keys(rows[0]);
+    if (h.includes("Número de contacto") && h.includes("Hora inicio")) return "agent_report";
+    if (h.includes("callType") && h.includes("callDate")) return "cdr";
+    return "agent_report";
+  }
+
+  const handleFile = useCallback(async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    e.target.value = "";
+    const text = await file.text();
+    const rows = parseCSV(text);
+    if (!rows.length) { setAlertMsg({ type:"error", msg:"Archivo vacío." }); return; }
+    const type = detectFileType(rows);
+    setAgentRows(rows);
+    setAgentFilename(file.name);
+    setFileType(type);
+    setResult(null);
+    const fnDate = dateFromFilename(file.name);
+    const dates = type === "agent_report"
+      ? [...new Set(rows.map(r=>r["Fecha"]).filter(Boolean))].sort()
+      : [...new Set(rows.map(r=>r["callDate"]).filter(Boolean))].sort();
+    const count = type === "agent_report" ? rows.length
+      : rows.filter(r=>r["callType"]==="CALL_TO_AGENT"&&r["disposition"]==="ANSWERED").length;
+    setAlertMsg({ type:"success", msg:`✅ ${file.name} · ${type==="agent_report"?"Reporte agente":"CDR"} · ${count} registros · Fechas: ${fnDate||dates.join(", ")}` });
+    setTimeout(()=>setAlertMsg(null),5000);
+  }, []);
+
+  const runCross = useCallback(() => {
+    if (!agentRows.length || !history.length) return;
+    const allVbRows = history.flatMap(h => h._rawRows || []);
+    const matched = [];
+    const usedAgent = new Set();
+
+    if (fileType === "agent_report") {
+      // Index by phone only (date-independent for cross-day matching)
+      const agIndex = {};
+      agentRows.forEach((r, i) => {
+        const phone = (r["Número de contacto"]||"").trim();
+        if (!phone) return;
+        if (!agIndex[phone]) agIndex[phone] = [];
+        agIndex[phone].push({ r, i });
+      });
+
+      allVbRows.forEach((vr, vbIdx) => {
+        const phone = (vr["Número Contacto"]||"").trim();
+        if (!phone) return;
+        const candidates = (agIndex[phone]||[]).filter(c => !usedAgent.has(c.i));
+        if (!candidates.length) return;
+        const { r: ar, i: ai } = candidates[0];
+        usedAgent.add(ai);
+        const vbDur = parseSec(vr["Tiempo total"]||"");
+        const agDur = parseSec(ar["Duración"]||"");
+        const cola  = parseSec(ar["Tiempo en cola"]||"");
+        matched.push({
+          phone,
+          _vbIdx: vbIdx,
+          fechaVb: vr["Fecha"]||"",
+          fechaAg: ar["Fecha"]||"",
+          horaVb:  vr["Inicio conversación"]||"",
+          horaAg:  ar["Hora inicio"]||"",
+          finalizado:   vr["Finalizado"]||"",
+          destino: (vr["Nombre destino"]||"").split("-").slice(-2).join(" "),
+          vbDur, agDur, cola,
+          totalDur: vbDur + agDur,
+          agente:       ar["Agente"]||"",
+          tipificacion: ar["Tipificación 1"]||"",
+          terminadoPor: ar["Terminado por"]||"",
+        });
+      });
+    } else {
+      const WINDOW = 180;
+      const agentCdr = agentRows.filter(r=>r["callType"]==="CALL_TO_AGENT"&&r["disposition"]==="ANSWERED");
+      allVbRows.forEach((vr, vbIdx) => {
+        const phone = (vr["Número Contacto"]||"").trim();
+        const fecha = (vr["Fecha"]||"").trim();
+        const vbEnd = toTs(fecha, vr["Inicio conversación"]||"") + parseSec(vr["Tiempo total"]||"");
+        if (!phone||!vbEnd) return;
+        let best=null, bestDiff=WINDOW+1;
+        agentCdr.forEach((ar,i) => {
+          if (usedAgent.has(i)) return;
+          if ((ar["source"]||"").trim()!==phone) return;
+          if ((ar["callDate"]||"").trim()!==fecha) return;
+          const diff = toTs(ar["callDate"],ar["callTime"]||"") - vbEnd;
+          if (diff>=-30&&diff<=WINDOW&&diff<bestDiff){bestDiff=diff;best={ar,i};}
+        });
+        if (best) {
+          usedAgent.add(best.i);
+          const vbDur = parseSec(vr["Tiempo total"]||"");
+          const agDur = parseSec(best.ar["duration"]||"");
+          matched.push({
+            phone, _vbIdx: vbIdx,
+            fechaVb:fecha, fechaAg:best.ar["callDate"]||"",
+            horaVb:vr["Inicio conversación"]||"", horaAg:best.ar["callTime"]||"",
+            finalizado:vr["Finalizado"]||"",
+            destino:(vr["Nombre destino"]||"").split("-").slice(-2).join(" "),
+            vbDur, agDur, cola:0, totalDur:vbDur+agDur,
+            agente:best.ar["agentNumber"]||best.ar["destination"]||"",
+            tipificacion:"", terminadoPor:best.ar["disposition"]||"",
+          });
+        }
+      });
+    }
+
+    // Collect unmatched VB rows — track by index to handle duplicate phones correctly
+    const matchedVbIndices = new Set(matched.map(r => r._vbIdx).filter(i => i !== undefined));
+    const unmatchedVbRows = allVbRows.filter((_, idx) => !matchedVbIndices.has(idx));
+    setResult({ matched, unmatchedRows: unmatchedVbRows, unmatched: unmatchedVbRows.length, vbTotal:allVbRows.length, agTotal:agentRows.length });
+  }, [agentRows, fileType, history]);
+
+  const vbDates = [...new Set(history.map(h=>h.fecha).filter(Boolean))].sort();
+  const agDates = agentRows.length
+    ? (fileType==="agent_report"
+        ? [...new Set(agentRows.map(r=>r["Fecha"]).filter(Boolean))].sort()
+        : [...new Set(agentRows.map(r=>r["callDate"]).filter(Boolean))].sort())
+    : [];
+
+  return (
+    <div>
+      {/* Upload header */}
+      <div style={{ background:C.white, borderRadius:12, padding:"20px 24px", boxShadow:"0 2px 10px rgba(0,0,0,0.06)", border:`1px solid ${C.borderLight}`, marginBottom:16 }}>
+        <div style={{ fontWeight:700, color:C.navy, fontSize:15, marginBottom:6 }}>🔗 Cruce Voicebot × Agente — por llamada</div>
+        <div style={{ fontSize:12, color:C.textMuted, marginBottom:12 }}>
+          Cruce por <strong>número de teléfono</strong>. Muestra tiempo en voicebot y tiempo con agente separados por cada llamada, con promedios globales.
+        </div>
+        <div style={{ fontSize:11, background:"#f5f8ff", borderRadius:6, padding:"6px 10px", marginBottom:14, color:C.textSub }}>
+          📅 Voicebot: <strong>{vbDates.join(", ")||"sin datos"}</strong>
+          {agDates.length>0 && <span> · Agente: <strong>{agDates.join(", ")}</strong></span>}
+        </div>
+        {alertMsg && (
+          <div style={{ background:alertMsg.type==="error"?C.redBg:C.greenBg, borderLeft:`4px solid ${alertMsg.type==="error"?C.orange:C.green}`, padding:"10px 14px", fontSize:12, color:alertMsg.type==="error"?"#c0392b":"#27ae60", fontWeight:600, borderRadius:8, marginBottom:14 }}>
+            {alertMsg.msg}
+          </div>
+        )}
+        <div style={{ display:"flex", gap:10, alignItems:"center", flexWrap:"wrap" }}>
+          <button onClick={()=>fileRef.current.click()} style={{ background:C.navyMid, color:"white", border:"none", borderRadius:8, padding:"9px 18px", fontSize:13, fontWeight:600, cursor:"pointer" }}>
+            📂 Subir reporte agente
+          </button>
+          {agentRows.length>0 && (
+            <button onClick={runCross} style={{ background:C.orange, color:"white", border:"none", borderRadius:8, padding:"9px 18px", fontSize:13, fontWeight:600, cursor:"pointer" }}>
+              🔗 Cruzar datos
+            </button>
+          )}
+          {agentFilename && <span style={{ fontSize:12, color:C.textMuted }}>📄 {agentFilename} · {agentRows.length} filas</span>}
+          <input ref={fileRef} type="file" accept=".csv" onChange={handleFile} style={{ display:"none" }} />
+        </div>
+      </div>
+
+      {/* Side by side summary */}
+      {agentRows.length>0 && (
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14, marginBottom:16 }}>
+          <div style={{ background:"#f0f7ff", borderRadius:12, padding:"16px 20px", border:`1px solid ${C.navyLight}` }}>
+            <div style={{ fontWeight:700, color:C.navy, marginBottom:10, fontSize:13 }}>🤖 Voicebot</div>
+            <div style={{ display:"flex", gap:16 }}>
+              <div><div style={{ fontSize:10, color:C.textMuted, fontWeight:600, textTransform:"uppercase" }}>Llamadas</div>
+                <div style={{ fontSize:26, fontWeight:800, color:C.navy, fontFamily:"'IBM Plex Mono',monospace" }}>{history.reduce((s,h)=>s+h.total,0)}</div></div>
+              <div><div style={{ fontSize:10, color:C.textMuted, fontWeight:600, textTransform:"uppercase" }}>Dur. prom.</div>
+                <div style={{ fontSize:26, fontWeight:800, color:C.navy, fontFamily:"'IBM Plex Mono',monospace" }}>
+                  {fmtSec(Math.round(history.reduce((s,h)=>s+Number(h.avgDur||0),0)/Math.max(history.length,1)))}
+                </div></div>
+            </div>
+          </div>
+          <div style={{ background:"#fff8f0", borderRadius:12, padding:"16px 20px", border:`1px solid #fde8d0` }}>
+            <div style={{ fontWeight:700, color:C.orange, marginBottom:10, fontSize:13 }}>👤 Agente</div>
+            <div style={{ display:"flex", gap:16 }}>
+              <div><div style={{ fontSize:10, color:C.textMuted, fontWeight:600, textTransform:"uppercase" }}>Registros</div>
+                <div style={{ fontSize:26, fontWeight:800, color:C.orange, fontFamily:"'IBM Plex Mono',monospace" }}>{agentRows.length}</div></div>
+              <div><div style={{ fontSize:10, color:C.textMuted, fontWeight:600, textTransform:"uppercase" }}>Dur. prom.</div>
+                <div style={{ fontSize:26, fontWeight:800, color:C.orange, fontFamily:"'IBM Plex Mono',monospace" }}>
+                  {(()=>{ const durs=agentRows.map(r=>parseSec(r["Duración"]||r["duration"]||"")).filter(d=>d>0); return durs.length?fmtSec(Math.round(durs.reduce((a,b)=>a+b,0)/durs.length)):"—"; })()}
+                </div></div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Results */}
+      {result && (()=>{
+        const allMatched = result.matched;
+        if (!allMatched.length) return (
+          <div style={{ textAlign:"center", padding:40, color:C.textMuted, background:C.white, borderRadius:12, border:`1px solid ${C.borderLight}` }}>
+            <div style={{ fontSize:36, marginBottom:10 }}>🔍</div>
+            <div style={{ fontWeight:600 }}>No se encontraron cruces</div>
+            <div style={{ fontSize:12, marginTop:6 }}>Los números de teléfono no coinciden entre ambos archivos.</div>
+          </div>
+        );
+
+        // Available dates from matched rows
+        const availDates = ["all", ...new Set(allMatched.map(r => r.fechaVb).filter(Boolean)).values()].sort();
+        const m = dateFilter === "all" ? allMatched : allMatched.filter(r => r.fechaVb === dateFilter);
+        const filteredUnmatched = dateFilter === "all"
+          ? result.unmatchedRows
+          : result.unmatchedRows.filter(vr => (vr["Fecha"]||"").trim() === dateFilter);
+
+        const avgVb   = m.length ? Math.round(m.reduce((s,r)=>s+r.vbDur,0)/m.length) : 0;
+        const avgAg   = m.length ? Math.round(m.reduce((s,r)=>s+r.agDur,0)/m.length) : 0;
+        const avgCola = m.length ? Math.round(m.reduce((s,r)=>s+r.cola,0)/m.length) : 0;
+        const avgTot  = m.length ? Math.round(m.reduce((s,r)=>s+r.totalDur,0)/m.length) : 0;
+        const totVb   = m.reduce((s,r)=>s+r.vbDur,0);
+        const totAg   = m.reduce((s,r)=>s+r.agDur,0);
+
+        // Chart 1: avg per flow (VB vs Agent)
+        const byFlow = {};
+        m.forEach(r => {
+          const f = r.destino||"Sin destino";
+          if (!byFlow[f]) byFlow[f]={ vDurs:[], aDurs:[] };
+          byFlow[f].vDurs.push(r.vbDur);
+          byFlow[f].aDurs.push(r.agDur);
+        });
+        const chartFlowData = Object.entries(byFlow).map(([flow,d])=>({
+          flow: flow.length>20?flow.slice(0,20)+"…":flow,
+          "Voicebot": d.vDurs.length?Math.round(d.vDurs.reduce((a,b)=>a+b,0)/d.vDurs.length):0,
+          "Agente":   d.aDurs.length?Math.round(d.aDurs.reduce((a,b)=>a+b,0)/d.aDurs.length):0,
+        }));
+
+        // Chart 2: avg agent duration per agent per flow
+        const byAgent = {};
+        m.forEach(r => {
+          const ag = r.agente||"Sin agente";
+          const f  = r.destino||"Sin destino";
+          if (!byAgent[ag]) byAgent[ag] = {};
+          if (!byAgent[ag][f]) byAgent[ag][f] = [];
+          byAgent[ag][f].push(r.agDur);
+        });
+        const agentNames = Object.keys(byAgent);
+        const allFlows   = [...new Set(m.map(r=>r.destino||"Sin destino"))];
+        const chartAgentData = agentNames.map(ag => {
+          const obj = { agente: ag.length>14?ag.slice(0,14)+"…":ag };
+          allFlows.forEach(f => {
+            const durs = byAgent[ag][f]||[];
+            obj[f.length>16?f.slice(0,16)+"…":f] = durs.length?Math.round(durs.reduce((a,b)=>a+b,0)/durs.length):0;
+          });
+          return obj;
+        });
+        const AGENT_COLORS = ["#e05c2a","#f08040","#f5aa70","#d4420a","#c0390a","#b02800","#e8703a"];
+
+        // Table grouped by agent
+        const byAgentTable = {};
+        m.forEach(r => {
+          const ag = r.agente||"Sin agente";
+          if (!byAgentTable[ag]) byAgentTable[ag] = [];
+          byAgentTable[ag].push(r);
+        });
+
+        return (
+          <div>
+            {/* Date filter */}
+            <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap", marginBottom:16 }}>
+              <span style={{ fontSize:12, color:C.textSub, fontWeight:600 }}>📅 Ver por:</span>
+              {availDates.map(d => (
+                <button key={d} onClick={() => setDateFilter(d)} style={{
+                  background: dateFilter===d ? C.navy : C.white,
+                  color: dateFilter===d ? "white" : C.navy,
+                  border: dateFilter===d ? "none" : `1px solid ${C.navyLight}`,
+                  borderRadius: 8, padding: "6px 16px", fontSize: 12, fontWeight: 600, cursor: "pointer",
+                }}>
+                  {d === "all" ? `Todas las fechas (${allMatched.length})` : `${d} (${allMatched.filter(r=>r.fechaVb===d).length})`}
+                </button>
+              ))}
+            </div>
+
+            {/* Global avg cards */}
+            <div style={{ background:"#f0f7ff", borderRadius:12, padding:"18px 20px", border:`2px solid ${C.navyLight}`, marginBottom:16 }}>
+              <div style={{ fontWeight:700, color:C.navy, marginBottom:14, fontSize:14 }}>📊 Promedios globales — {m.length} llamadas cruzadas{dateFilter!=="all"?` · ${dateFilter}`:""}</div>
+              <div style={{ display:"flex", gap:12, flexWrap:"wrap" }}>
+                {[
+                  { label:"Llamadas cruzadas", value:m.length,        sub:`de ${result.vbTotal} VB / ${result.agTotal} agente`, accent:C.green, big:true },
+                  { label:"Sin cruce",          value:result.unmatched, sub:"Sin coincidencia",                                 accent:C.textMuted },
+                  { label:"⌀ Tiempo voicebot",  value:fmtSec(avgVb),   sub:"Promedio en VB",                                   accent:C.navy, big:true },
+                  { label:"⌀ Tiempo en cola",   value:fmtSec(avgCola), sub:"Espera antes del agente",                          accent:C.navyMid },
+                  { label:"⌀ Tiempo agente",    value:fmtSec(avgAg),   sub:"Promedio con agente",                              accent:C.orange, big:true },
+                  { label:"⌀ Tiempo total",     value:fmtSec(avgTot),  sub:"VB + agente",                                      accent:"#27ae60", big:true },
+                  { label:"Total acum. VB",      value:fmtSec(totVb),   sub:"Suma VB",                                          accent:C.navy },
+                  { label:"Total acum. agente",  value:fmtSec(totAg),   sub:"Suma agente",                                      accent:C.orange },
+                ].map((s,i)=>(
+                  <div key={i} style={{ background:C.white, borderRadius:12, padding:s.big?"16px 20px":"12px 16px", boxShadow:"0 2px 10px rgba(0,0,0,0.06)", border:`1px solid ${C.borderLight}`, flex:s.big?"1 1 140px":"1 1 110px" }}>
+                    <div style={{ fontSize:10, color:C.textMuted, fontWeight:600, textTransform:"uppercase", marginBottom:4 }}>{s.label}</div>
+                    <div style={{ fontSize:s.big?26:20, fontWeight:800, color:s.accent, fontFamily:"'IBM Plex Mono',monospace" }}>{s.value}</div>
+                    <div style={{ fontSize:10, color:C.textMuted, marginTop:3 }}>{s.sub}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Charts: VB and Agent by flow — side by side */}
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14, marginBottom:14 }}>
+              <div style={{ background:C.white, borderRadius:12, padding:"18px 20px", boxShadow:"0 2px 10px rgba(0,0,0,0.06)", border:`1px solid ${C.borderLight}` }}>
+                <div style={{ fontWeight:700, color:C.navy, marginBottom:4, fontSize:13 }}>🤖 Tiempo promedio en Voicebot por flujo</div>
+                <div style={{ fontSize:11, color:C.textMuted, marginBottom:14 }}>Duración promedio dentro del voicebot</div>
+                <ResponsiveContainer width="100%" height={220}>
+                  <BarChart data={chartFlowData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f0f4f8"/>
+                    <XAxis dataKey="flow" tick={{ fontSize:9, fill:C.textMuted }}/>
+                    <YAxis tick={{ fontSize:9, fill:C.textMuted }} tickFormatter={v=>fmtSec(v)}/>
+                    <Tooltip formatter={v=>[fmtSec(v),"Voicebot"]}/>
+                    <Bar dataKey="Voicebot" fill={C.navy} radius={[4,4,0,0]}/>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+              <div style={{ background:C.white, borderRadius:12, padding:"18px 20px", boxShadow:"0 2px 10px rgba(0,0,0,0.06)", border:`1px solid ${C.borderLight}` }}>
+                <div style={{ fontWeight:700, color:C.orange, marginBottom:4, fontSize:13 }}>👤 Tiempo promedio con Agente por flujo</div>
+                <div style={{ fontSize:11, color:C.textMuted, marginBottom:14 }}>Duración promedio de atención del agente</div>
+                <ResponsiveContainer width="100%" height={220}>
+                  <BarChart data={chartFlowData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f0f4f8"/>
+                    <XAxis dataKey="flow" tick={{ fontSize:9, fill:C.textMuted }}/>
+                    <YAxis tick={{ fontSize:9, fill:C.textMuted }} tickFormatter={v=>fmtSec(v)}/>
+                    <Tooltip formatter={v=>[fmtSec(v),"Agente"]}/>
+                    <Bar dataKey="Agente" fill={C.orange} radius={[4,4,0,0]}/>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            {/* Chart 2: Agent avg duration by flow */}
+            {chartAgentData.length > 0 && (
+              <div style={{ background:C.white, borderRadius:12, padding:"18px 20px", boxShadow:"0 2px 10px rgba(0,0,0,0.06)", border:`1px solid ${C.borderLight}`, marginBottom:14 }}>
+                <div style={{ fontWeight:700, color:C.navy, marginBottom:14 }}>👤 Tiempo promedio de llamada por agente y flujo de destino</div>
+                <ResponsiveContainer width="100%" height={260}>
+                  <BarChart data={chartAgentData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f0f4f8"/>
+                    <XAxis dataKey="agente" tick={{ fontSize:10, fill:C.textMuted }}/>
+                    <YAxis tick={{ fontSize:10, fill:C.textMuted }} tickFormatter={v=>fmtSec(v)}/>
+                    <Tooltip formatter={v=>[fmtSec(v)]}/>
+                    <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize:10 }}/>
+                    {allFlows.map((f,i)=>(
+                      <Bar key={f} dataKey={f.length>16?f.slice(0,16)+"…":f} fill={AGENT_COLORS[i%AGENT_COLORS.length]} radius={[3,3,0,0]}/>
+                    ))}
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+
+            {/* Table by agent */}
+            <div style={{ background:C.white, borderRadius:12, padding:"18px 20px", boxShadow:"0 2px 10px rgba(0,0,0,0.06)", border:`1px solid ${C.borderLight}`, marginBottom:14 }}>
+              <div style={{ fontWeight:700, color:C.navy, marginBottom:14 }}>👤 Resumen por agente</div>
+              <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
+                <thead>
+                  <tr style={{ background:"#f5f8ff" }}>
+                    {["Agente","Llamadas","⌀ Tiempo VB","⌀ Tiempo Agente","⌀ Total","Total acum."].map(h=>(
+                      <th key={h} style={{ padding:"8px 12px", textAlign:"left", color:C.textMuted, fontWeight:600, borderBottom:`1px solid ${C.borderLight}`, whiteSpace:"nowrap", fontSize:11 }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.entries(byAgentTable).sort((a,b)=>b[1].length-a[1].length).map(([ag, rows])=>{
+                    const aVb  = Math.round(rows.reduce((s,r)=>s+r.vbDur,0)/rows.length);
+                    const aAg  = Math.round(rows.reduce((s,r)=>s+r.agDur,0)/rows.length);
+                    const aTot = Math.round(rows.reduce((s,r)=>s+r.totalDur,0)/rows.length);
+                    const tTot = rows.reduce((s,r)=>s+r.totalDur,0);
+                    return (
+                      <tr key={ag} style={{ borderBottom:`1px solid ${C.borderLight}` }}
+                        onMouseEnter={e=>e.currentTarget.style.background="#f5f8ff"}
+                        onMouseLeave={e=>e.currentTarget.style.background="white"}>
+                        <td style={{ padding:"8px 12px", fontWeight:700, color:C.navy }}>{ag}</td>
+                        <td style={{ padding:"8px 12px", fontFamily:"'IBM Plex Mono',monospace", color:C.navy }}>{rows.length}</td>
+                        <td style={{ padding:"8px 12px", fontFamily:"'IBM Plex Mono',monospace", color:C.navyMid }}>{fmtSec(aVb)}</td>
+                        <td style={{ padding:"8px 12px", fontFamily:"'IBM Plex Mono',monospace", color:C.orange, fontWeight:700 }}>{fmtSec(aAg)}</td>
+                        <td style={{ padding:"8px 12px", fontFamily:"'IBM Plex Mono',monospace", color:"#27ae60", fontWeight:700 }}>{fmtSec(aTot)}</td>
+                        <td style={{ padding:"8px 12px", fontFamily:"'IBM Plex Mono',monospace", color:C.navy }}>{fmtSec(tTot)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Per-call detail table */}
+            <div style={{ background:C.white, borderRadius:12, padding:"18px 20px", boxShadow:"0 2px 10px rgba(0,0,0,0.06)", border:`1px solid ${C.borderLight}` }}>
+              <div style={{ fontWeight:700, color:C.navy, marginBottom:14 }}>📋 Detalle por llamada ({m.length})</div>
+              <div style={{ overflowX:"auto" }}>
+                <table style={{ width:"100%", borderCollapse:"collapse", fontSize:11 }}>
+                  <thead>
+                    <tr style={{ background:"#f5f8ff" }}>
+                      {["#","Teléfono","Fecha VB","Hora VB","Fecha Ag.","Hora Ag.","Flujo","⏱ VB","🚶 Cola","👤 Agente","🔵 Total","Nombre Agente","Tipificación"].map(h=>(
+                        <th key={h} style={{ padding:"7px 10px", textAlign:"left", color:C.textMuted, fontWeight:600, borderBottom:`1px solid ${C.borderLight}`, whiteSpace:"nowrap", fontSize:10 }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tr style={{ background:"#f0f7ff", borderBottom:`2px solid ${C.navyLight}` }}>
+                    <td colSpan={7} style={{ padding:"7px 10px", fontWeight:700, color:C.navy, fontSize:11 }}>⌀ PROMEDIOS</td>
+                    <td style={{ padding:"7px 10px", fontFamily:"'IBM Plex Mono',monospace", color:C.navy, fontWeight:800 }}>{fmtSec(avgVb)}</td>
+                    <td style={{ padding:"7px 10px", fontFamily:"'IBM Plex Mono',monospace", color:C.navyMid, fontWeight:800 }}>{fmtSec(avgCola)}</td>
+                    <td style={{ padding:"7px 10px", fontFamily:"'IBM Plex Mono',monospace", color:C.orange, fontWeight:800 }}>{fmtSec(avgAg)}</td>
+                    <td style={{ padding:"7px 10px", fontFamily:"'IBM Plex Mono',monospace", color:"#27ae60", fontWeight:800 }}>{fmtSec(avgTot)}</td>
+                    <td colSpan={2}></td>
+                  </tr>
+                  <tbody>
+                    {m.map((r,i)=>(
+                      <tr key={i} style={{ borderBottom:`1px solid ${C.borderLight}` }}
+                        onMouseEnter={e=>e.currentTarget.style.background="#f5f8ff"}
+                        onMouseLeave={e=>e.currentTarget.style.background="white"}>
+                        <td style={{ padding:"7px 10px", color:C.textMuted }}>{i+1}</td>
+                        <td style={{ padding:"7px 10px", fontFamily:"'IBM Plex Mono',monospace", color:C.navy, fontWeight:600 }}>{r.phone}</td>
+                        <td style={{ padding:"7px 10px", color:C.textSub, fontSize:10 }}>{r.fechaVb}</td>
+                        <td style={{ padding:"7px 10px", color:C.textMuted }}>{r.horaVb}</td>
+                        <td style={{ padding:"7px 10px", color:C.textSub, fontSize:10 }}>{r.fechaAg}</td>
+                        <td style={{ padding:"7px 10px", color:C.textMuted }}>{r.horaAg}</td>
+                        <td style={{ padding:"7px 10px", fontSize:10, color:C.textMuted, maxWidth:110, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r.destino}</td>
+                        <td style={{ padding:"7px 10px", fontFamily:"'IBM Plex Mono',monospace", color:C.navy, fontWeight:700 }}>
+                          {fmtSec(r.vbDur)}
+                          <div style={{ width:`${Math.min((r.vbDur/(avgVb*2||1))*100,100).toFixed(0)}%`, height:3, background:C.navy, borderRadius:2, marginTop:2 }}/>
+                        </td>
+                        <td style={{ padding:"7px 10px", fontFamily:"'IBM Plex Mono',monospace", color:C.navyMid }}>{fmtSec(r.cola)}</td>
+                        <td style={{ padding:"7px 10px", fontFamily:"'IBM Plex Mono',monospace", color:C.orange, fontWeight:700 }}>
+                          {fmtSec(r.agDur)}
+                          <div style={{ width:`${Math.min((r.agDur/(avgAg*2||1))*100,100).toFixed(0)}%`, height:3, background:C.orange, borderRadius:2, marginTop:2 }}/>
+                        </td>
+                        <td style={{ padding:"7px 10px", fontFamily:"'IBM Plex Mono',monospace", color:"#27ae60", fontWeight:800 }}>{fmtSec(r.totalDur)}</td>
+                        <td style={{ padding:"7px 10px", fontSize:10, color:C.textMuted }}>{r.agente}</td>
+                        <td style={{ padding:"7px 10px", fontSize:10, color:C.textMuted, maxWidth:110, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r.tipificacion}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Unmatched calls */}
+            {filteredUnmatched && filteredUnmatched.length > 0 && (
+              <div style={{ background:C.white, borderRadius:12, padding:"18px 20px", boxShadow:"0 2px 10px rgba(0,0,0,0.06)", border:`2px solid ${C.orange}`, marginTop:14 }}>
+                <div style={{ fontWeight:700, color:C.orange, marginBottom:12, fontSize:14 }}>
+                  ⚠️ Llamadas del voicebot sin cruce
+                </div>
+                <div style={{ display:"flex", gap:12, flexWrap:"wrap", marginBottom:16 }}>
+                  {[
+                    { label:"Sin cruce", value:filteredUnmatched.length, sub:`Llamadas VB sin agente`, accent:C.orange },
+                    { label:"% sin cruce", value:((filteredUnmatched.length/(m.length+filteredUnmatched.length||1))*100).toFixed(1)+"%", sub:`de ${m.length+filteredUnmatched.length} en VB`, accent:C.orange },
+                    { label:"Con cruce", value:result.matched.length, sub:"Llamadas cruzadas", accent:C.green },
+                    { label:"% cruzado", value:((result.matched.length/result.vbTotal)*100).toFixed(1)+"%", sub:"Tasa de cruce", accent:C.green },
+                  ].map((s,i) => (
+                    <div key={i} style={{ background:"#fff8f5", borderRadius:10, padding:"12px 18px", border:`1px solid #fde8d0`, flex:"1 1 120px" }}>
+                      <div style={{ fontSize:10, color:C.textMuted, fontWeight:600, textTransform:"uppercase", marginBottom:4 }}>{s.label}</div>
+                      <div style={{ fontSize:24, fontWeight:800, color:s.accent, fontFamily:"'IBM Plex Mono',monospace" }}>{s.value}</div>
+                      <div style={{ fontSize:10, color:C.textMuted, marginTop:3 }}>{s.sub}</div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ fontSize:12, color:C.textMuted, marginBottom:14 }}>
+                  Estas llamadas del voicebot no encontraron una llamada de agente con el mismo número de teléfono{fileType === "agent_report" ? " y fecha" : ", fecha y hora"}.
+                </div>
+                <div style={{ overflowX:"auto" }}>
+                  <table style={{ width:"100%", borderCollapse:"collapse", fontSize:11 }}>
+                    <thead>
+                      <tr style={{ background:"#fff0ed" }}>
+                        {["#","Teléfono","Fecha","Hora inicio","Duración VB","Finalizado","Flujo destino"].map(h=>(
+                          <th key={h} style={{ padding:"7px 10px", textAlign:"left", color:C.orange, fontWeight:600, borderBottom:`1px solid #fde8d0`, whiteSpace:"nowrap", fontSize:10 }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredUnmatched.map((vr,i)=>(
+                        <tr key={i} style={{ borderBottom:`1px solid #fde8d0` }}
+                          onMouseEnter={e=>e.currentTarget.style.background="#fff8f5"}
+                          onMouseLeave={e=>e.currentTarget.style.background="white"}>
+                          <td style={{ padding:"7px 10px", color:C.textMuted }}>{i+1}</td>
+                          <td style={{ padding:"7px 10px", fontFamily:"'IBM Plex Mono',monospace", color:C.orange, fontWeight:600 }}>{(vr["Número Contacto"]||"").trim()}</td>
+                          <td style={{ padding:"7px 10px", color:C.textSub }}>{vr["Fecha"]||""}</td>
+                          <td style={{ padding:"7px 10px", color:C.textMuted }}>{vr["Inicio conversación"]||""}</td>
+                          <td style={{ padding:"7px 10px", fontFamily:"'IBM Plex Mono',monospace", color:C.navy }}>{fmtSec(parseSec(vr["Tiempo total"]||""))}</td>
+                          <td style={{ padding:"7px 10px", fontSize:10, color:C.textSub }}>{vr["Finalizado"]||""}</td>
+                          <td style={{ padding:"7px 10px", fontSize:10, color:C.textMuted, maxWidth:140, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{(vr["Nombre destino"]||"").split("-").slice(-2).join(" ")}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
+      {!agentRows.length && (
+        <div style={{ textAlign:"center", padding:60, color:C.textMuted }}>
+          <div style={{ fontSize:48, marginBottom:12 }}>🔗</div>
+          <div style={{ fontWeight:600, fontSize:16 }}>Sube el reporte del agente para cruzar con el voicebot</div>
+          <div style={{ fontSize:13, marginTop:6 }}>Cruce automático por número de teléfono.</div>
+          <div style={{ marginTop:12, fontSize:11, color:C.textMuted, background:"#f5f8ff", borderRadius:8, padding:"8px 16px", display:"inline-block" }}>
+            📅 Voicebot cargado: <strong>{[...new Set(history.map(h=>h.fecha))].join(", ")||"ninguno"}</strong>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 // ─── HISTORY PANEL ────────────────────────────────────────────────────────────
 function HistoryPanel({ history }) {
   const [selectedDay, setSelectedDay] = useState(null);
@@ -586,9 +1112,12 @@ function IVRDashboard() {
     try {
       const stored = JSON.parse(localStorage.getItem("ivr_placa_v3") || "null");
       if (stored) {
-        const { hist, latest } = stored;
-        setHistory(hist || []);
-        setMetrics(m => ({ ...m, ...(latest || {}) }));
+        const hist = stored.hist || [];
+        const latest = stored.latest || {};
+        if (hist.length > 0) {
+          setHistory(hist);
+          setMetrics(m => ({ ...m, ...latest }));
+        }
       }
     } catch {}
   }, []);
@@ -622,10 +1151,16 @@ function IVRDashboard() {
   }, [history, metrics]);
 
   const clearAll = useCallback(() => {
-    if (!confirm("¿Borrar todo el historial?")) return;
+    if (!confirm("¿Borrar todo el historial y datos cargados?")) return;
+    // Reset React state immediately
     setMetrics({ PA: null, CR: null });
     setHistory([]);
+    setTab("regional");
+    // Overwrite storage with empty — delete alone may not work
+
     try { localStorage.removeItem("ivr_placa_v3"); } catch {}
+    // Force page reload to guarantee clean state
+    setTimeout(() => window.location.reload(), 300);
   }, []);
 
   const TABS = [
@@ -633,6 +1168,7 @@ function IVRDashboard() {
     { id: "PA", label: `${FLAG.PA} Panamá` },
     { id: "CR", label: `${FLAG.CR} Costa Rica` },
     { id: "history", label: "📁 Historial" },
+    { id: "cross", label: "🔗 Cruce Agente" },
   ];
 
   return (
@@ -666,7 +1202,7 @@ function IVRDashboard() {
 
       <div style={{ padding: "16px 28px 0", display: "flex", gap: 8, flexWrap: "wrap" }}>
         {TABS.map(t => {
-          const hasData = t.id === "regional" ? Object.values(metrics).some(Boolean) : t.id === "history" ? history.length > 0 : !!metrics[t.id];
+          const hasData = t.id === "regional" ? Object.values(metrics).some(Boolean) : t.id === "history" ? history.length > 0 : t.id === "cross" ? false : !!metrics[t.id];
           return (
             <button key={t.id} onClick={() => setTab(t.id)} style={{
               background: tab === t.id ? C.navy : C.white,
@@ -689,6 +1225,7 @@ function IVRDashboard() {
         {tab === "PA" && <CountryView country="PA" history={history} />}
         {tab === "CR" && <CountryView country="CR" history={history} />}
         {tab === "history" && <HistoryPanel history={history} />}
+        {tab === "cross" && <CrossPanel history={history} />}
       </div>
     </div>
   );
