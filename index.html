@@ -22,12 +22,17 @@
   </style>
 </head>
 <body>
-<div id="root"><div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;color:#1e3a5f"><div style="text-align:center"><div style="font-size:40px;margin-bottom:12px">⏳</div><div style="font-weight:700;font-size:16px">Cargando dashboard...</div></div></div></div><div id="error-display" style="display:none;padding:20px;background:#fff0ed;color:#c0392b;font-family:monospace;font-size:12px;white-space:pre-wrap"></div>
+<div id="root">
+  <div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;color:#1e3a5f">
+    <div style="text-align:center">
+      <div style="font-size:40px;margin-bottom:12px">⏳</div>
+      <div style="font-weight:700;font-size:16px">Cargando dashboard...</div>
+    </div>
+  </div>
+</div>
 <script>
 window.onerror = function(msg, src, line, col, err) {
-  var d = document.getElementById("error-display");
-  if(d) { d.style.display="block"; d.textContent = "Error: " + msg + "\nLine: " + line + "\n" + (err ? err.stack : ""); }
-  document.getElementById("root").innerHTML = '<div style="padding:40px;text-align:center;color:#c0392b"><div style="font-size:32px;margin-bottom:12px">⚠️</div><div style="font-weight:700">Error al cargar el dashboard</div><div style="font-size:13px;margin-top:8px">Abre las herramientas de desarrollador (F12) para ver el detalle</div></div>';
+  document.getElementById("root").innerHTML = '<div style="padding:40px;text-align:center;color:#c0392b"><div style="font-size:32px;margin-bottom:12px">&#9888;&#65039;</div><div style="font-weight:700;font-size:16px">Error al cargar</div><pre style="margin-top:12px;font-size:11px;text-align:left;background:#fff0ed;padding:12px;border-radius:8px;overflow:auto">' + msg + '\nLinea: ' + line + '</pre></div>';
 };
 </script>
 <script type="text/babel">
@@ -35,8 +40,7 @@ const { useState, useEffect, useRef, useCallback } = React;
 const { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
         ResponsiveContainer, LineChart, Line, PieChart, Pie, Cell, ComposedChart } = Recharts;
 
-import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer, LineChart, Line, PieChart, Pie, Cell, ComposedChart
 } from "recharts";
 
@@ -182,7 +186,7 @@ function mergeMetrics(days) {
   const flowDursAcc = {};
   days.forEach(d => {
     Object.entries(d.flows).forEach(([k, v]) => { flows[k] = (flows[k] || 0) + v; });
-    if (d.flowAvgDur) Object.entries(d.flowAvgDur||{}).forEach(([k, v]) => {
+    if (d.flowAvgDur) Object.entries(d.flowAvgDur).forEach(([k, v]) => {
       if (!flowDursAcc[k]) flowDursAcc[k] = [];
       if (v > 0) flowDursAcc[k].push(v);
     });
@@ -622,7 +626,7 @@ function IVRDashboard() {
     setTab(latest.country);
   }, [history, metrics]);
 
-  const clearAll = useCallback(async () => {
+  const clearAll = useCallback(() => {
     if (!confirm("¿Borrar todo el historial?")) return;
     setMetrics({ PA: null, CR: null });
     setHistory([]);
@@ -695,7 +699,7 @@ function IVRDashboard() {
   );
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(<IVRDashboard />);
+ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(IVRDashboard));
 </script>
 </body>
 </html>
