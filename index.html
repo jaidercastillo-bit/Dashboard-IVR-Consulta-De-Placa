@@ -105,7 +105,11 @@ const FLOW_MAP = [
   // ivr-pa-sura-vPlate-unknowed-flow  → Cliente no se identifica por placa
   ["Cliente no se identifica por placa",  ["vplate-unknowed-flow", "unknowed-plate", "plateunidentified", "user-unknowed"]],
   // ivr-pa-sura-vPlate-nolase-flow    → Cliente no menciona placa
-  ["Cliente no menciona placa",           ["vplate-nolase-flow", "fallback"]],
+  ["Cliente no menciona placa",           ["vplate-nolase-flow", "nolase-flow"]],
+  // ivr-pa-sura-cContract-unknowed-f → No se encontró contrato
+  ["No se encontró contrato",             ["ccontract-unknowed"]],
+  // ivr-pa-sura-fallback-flow → Fallback
+  ["Fallback",                            ["fallback-flow"]],
   // ── Flujos existentes (compatibilidad CR y variantes antiguas PA) ─────────
   ["Cliente identificado por teléfono",   ["phone-identified"]],
   ["Inactividad",                         ["inactivity"]],
