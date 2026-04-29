@@ -85,16 +85,38 @@ function fmtSec(s) {
   return `${Math.floor(n / 60)}m ${n % 60}s`;
 }
 
-
 // Extract date from filename: supports DD-MM-YYYY, YYYY-MM-DD, DD_MM_YYYY etc.
 function dateFromFilename(filename) {
   const m =
-    filename.match(/(\d{2})[_-](\d{2})[_-](\d{4})/) ||  // DD-MM-YYYY or DD_MM_YYYY
-    filename.match(/(\d{4})[_-](\d{2})[_-](\d{2})/);     // YYYY-MM-DD
+    filename.match(/(\d{2})[_-](\d{2})[_-](\d{4})/) ||
+    filename.match(/(\d{4})[_-](\d{2})[_-](\d{2})/);
   if (!m) return null;
-  // If first group is 4 digits it's YYYY-MM-DD
   if (m[1].length === 4) return `${m[3]}/${m[2]}/${m[1]}`;
   return `${m[1]}/${m[2]}/${m[3]}`;
+}
+
+// ─── FLOW MAP ─────────────────────────────────────────────────────────────────
+// Cada entrada: [etiqueta visible, [...patrones a buscar en "Nombre destino" (lowercase)]]
+// Se evalúan en orden — el primer match gana.
+const FLOW_MAP = [
+  // ── Nuevos flujos PA ──────────────────────────────────────────────────────
+  // ivr-pa-sura-vPlate-identified-fl  → Cliente identificado por placa
+  ["Cliente identificado por placa",      ["vplate-identified-fl", "suraplate-identified", "suraplateidentified"]],
+  // ivr-pa-sura-vPlate-unknowed-flow  → Cliente no se identifica por placa
+  ["Cliente no se identifica por placa",  ["vplate-unknowed-flow", "unknowed-plate", "plateunidentified", "user-unknowed"]],
+  // ivr-pa-sura-vPlate-nolase-flow    → Cliente no menciona placa
+  ["Cliente no menciona placa",           ["vplate-nolase-flow", "fallback"]],
+  // ── Flujos existentes (compatibilidad CR y variantes antiguas PA) ─────────
+  ["Cliente identificado por teléfono",   ["phone-identified"]],
+  ["Inactividad",                         ["inactivity"]],
+];
+
+function classifyFlow(nombreDestino) {
+  const nd = (nombreDestino || "").toLowerCase();
+  for (const [label, patterns] of FLOW_MAP) {
+    if (patterns.some(p => nd.includes(p))) return label;
+  }
+  return "Colgada (pendiente funnel)";
 }
 
 // ─── METRICS ─────────────────────────────────────────────────────────────────
@@ -114,34 +136,22 @@ function deriveMetrics(rows, filename) {
 function deriveDay(rows, filename, country, fecha) {
   const total = rows.length;
   const voicebot = rows[0]["Voicebot"] || "Desconocido";
-  // Override fecha with date from filename if extractable
   const filenameDate = dateFromFilename(filename);
   if (filenameDate) fecha = filenameDate;
 
   const resultados = {};
   rows.forEach(r => { const k = r["Finalizado"] || "Sin dato"; resultados[k] = (resultados[k] || 0) + 1; });
 
-  const flowMap = {
-    "Cliente identificado por placa": ["suraplate-identified", "suraplateidentified"],
-    "Cliente identificado por teléfono": ["phone-identified"],
-    "Fallback (input es No la sé)": ["unknowed-plate", "plateunidentified"],
-    "Fallback (consulta de placa 2x)": ["user-unknowed"],
-    "Fallback (no se menciona placa)": ["fallback"],
-    "Inactividad": ["inactivity"],
-  };
   const flows = {};
   const flowDurs = {};
   rows.forEach(r => {
-    const nd = (r["Nombre destino"] || "").toLowerCase();
     const dur = parseSec(r["Tiempo total"]);
-    let matched = "Colgada (pendiente funnel)";
-    for (const [label, patterns] of Object.entries(flowMap)) {
-      if (patterns.some(p => nd.includes(p))) { matched = label; break; }
-    }
+    const matched = classifyFlow(r["Nombre destino"]);
     flows[matched] = (flows[matched] || 0) + 1;
     if (!flowDurs[matched]) flowDurs[matched] = [];
     if (dur > 0) flowDurs[matched].push(dur);
   });
+
   const flowAvgDur = {};
   Object.entries(flowDurs).forEach(([k, durs]) => {
     flowAvgDur[k] = durs.length ? Math.round(durs.reduce((a, b) => a + b, 0) / durs.length) : 0;
@@ -559,7 +569,6 @@ function CrossPanel({ history }) {
     const usedAgent = new Set();
 
     if (fileType === "agent_report") {
-      // Index by phone only (date-independent for cross-day matching)
       const agIndex = {};
       agentRows.forEach((r, i) => {
         const phone = (r["Número de contacto"]||"").trim();
@@ -628,7 +637,6 @@ function CrossPanel({ history }) {
       });
     }
 
-    // Collect unmatched VB rows — track by index to handle duplicate phones correctly
     const matchedVbIndices = new Set(matched.map(r => r._vbIdx).filter(i => i !== undefined));
     const unmatchedVbRows = allVbRows.filter((_, idx) => !matchedVbIndices.has(idx));
     setResult({ matched, unmatchedRows: unmatchedVbRows, unmatched: unmatchedVbRows.length, vbTotal:allVbRows.length, agTotal:agentRows.length });
@@ -643,7 +651,6 @@ function CrossPanel({ history }) {
 
   return (
     <div>
-      {/* Upload header */}
       <div style={{ background:C.white, borderRadius:12, padding:"20px 24px", boxShadow:"0 2px 10px rgba(0,0,0,0.06)", border:`1px solid ${C.borderLight}`, marginBottom:16 }}>
         <div style={{ fontWeight:700, color:C.navy, fontSize:15, marginBottom:6 }}>🔗 Cruce Voicebot × Agente — por llamada</div>
         <div style={{ fontSize:12, color:C.textMuted, marginBottom:12 }}>
@@ -672,7 +679,6 @@ function CrossPanel({ history }) {
         </div>
       </div>
 
-      {/* Side by side summary */}
       {agentRows.length>0 && (
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14, marginBottom:16 }}>
           <div style={{ background:"#f0f7ff", borderRadius:12, padding:"16px 20px", border:`1px solid ${C.navyLight}` }}>
@@ -700,7 +706,6 @@ function CrossPanel({ history }) {
         </div>
       )}
 
-      {/* Results */}
       {result && (()=>{
         const allMatched = result.matched;
         if (!allMatched.length) return (
@@ -711,7 +716,6 @@ function CrossPanel({ history }) {
           </div>
         );
 
-        // Available dates from matched rows
         const availDates = ["all", ...new Set(allMatched.map(r => r.fechaVb).filter(Boolean)).values()].sort();
         const m = dateFilter === "all" ? allMatched : allMatched.filter(r => r.fechaVb === dateFilter);
         const filteredUnmatched = dateFilter === "all"
@@ -725,7 +729,6 @@ function CrossPanel({ history }) {
         const totVb   = m.reduce((s,r)=>s+r.vbDur,0);
         const totAg   = m.reduce((s,r)=>s+r.agDur,0);
 
-        // Chart 1: avg per flow (VB vs Agent)
         const byFlow = {};
         m.forEach(r => {
           const f = r.destino||"Sin destino";
@@ -739,7 +742,6 @@ function CrossPanel({ history }) {
           "Agente":   d.aDurs.length?Math.round(d.aDurs.reduce((a,b)=>a+b,0)/d.aDurs.length):0,
         }));
 
-        // Chart 2: avg agent duration per agent per flow
         const byAgent = {};
         m.forEach(r => {
           const ag = r.agente||"Sin agente";
@@ -760,7 +762,6 @@ function CrossPanel({ history }) {
         });
         const AGENT_COLORS = ["#e05c2a","#f08040","#f5aa70","#d4420a","#c0390a","#b02800","#e8703a"];
 
-        // Table grouped by agent
         const byAgentTable = {};
         m.forEach(r => {
           const ag = r.agente||"Sin agente";
@@ -770,7 +771,6 @@ function CrossPanel({ history }) {
 
         return (
           <div>
-            {/* Date filter */}
             <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap", marginBottom:16 }}>
               <span style={{ fontSize:12, color:C.textSub, fontWeight:600 }}>📅 Ver por:</span>
               {availDates.map(d => (
@@ -785,7 +785,6 @@ function CrossPanel({ history }) {
               ))}
             </div>
 
-            {/* Global avg cards */}
             <div style={{ background:"#f0f7ff", borderRadius:12, padding:"18px 20px", border:`2px solid ${C.navyLight}`, marginBottom:16 }}>
               <div style={{ fontWeight:700, color:C.navy, marginBottom:14, fontSize:14 }}>📊 Promedios globales — {m.length} llamadas cruzadas{dateFilter!=="all"?` · ${dateFilter}`:""}</div>
               <div style={{ display:"flex", gap:12, flexWrap:"wrap" }}>
@@ -808,7 +807,6 @@ function CrossPanel({ history }) {
               </div>
             </div>
 
-            {/* Charts: VB and Agent by flow — side by side */}
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14, marginBottom:14 }}>
               <div style={{ background:C.white, borderRadius:12, padding:"18px 20px", boxShadow:"0 2px 10px rgba(0,0,0,0.06)", border:`1px solid ${C.borderLight}` }}>
                 <div style={{ fontWeight:700, color:C.navy, marginBottom:4, fontSize:13 }}>🤖 Tiempo promedio en Voicebot por flujo</div>
@@ -838,7 +836,6 @@ function CrossPanel({ history }) {
               </div>
             </div>
 
-            {/* Chart 2: Agent avg duration by flow */}
             {chartAgentData.length > 0 && (
               <div style={{ background:C.white, borderRadius:12, padding:"18px 20px", boxShadow:"0 2px 10px rgba(0,0,0,0.06)", border:`1px solid ${C.borderLight}`, marginBottom:14 }}>
                 <div style={{ fontWeight:700, color:C.navy, marginBottom:14 }}>👤 Tiempo promedio de llamada por agente y flujo de destino</div>
@@ -857,7 +854,6 @@ function CrossPanel({ history }) {
               </div>
             )}
 
-            {/* Table by agent */}
             <div style={{ background:C.white, borderRadius:12, padding:"18px 20px", boxShadow:"0 2px 10px rgba(0,0,0,0.06)", border:`1px solid ${C.borderLight}`, marginBottom:14 }}>
               <div style={{ fontWeight:700, color:C.navy, marginBottom:14 }}>👤 Resumen por agente</div>
               <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
@@ -891,7 +887,6 @@ function CrossPanel({ history }) {
               </table>
             </div>
 
-            {/* Per-call detail table */}
             <div style={{ background:C.white, borderRadius:12, padding:"18px 20px", boxShadow:"0 2px 10px rgba(0,0,0,0.06)", border:`1px solid ${C.borderLight}` }}>
               <div style={{ fontWeight:700, color:C.navy, marginBottom:14 }}>📋 Detalle por llamada ({m.length})</div>
               <div style={{ overflowX:"auto" }}>
@@ -942,7 +937,6 @@ function CrossPanel({ history }) {
               </div>
             </div>
 
-            {/* Unmatched calls */}
             {filteredUnmatched && filteredUnmatched.length > 0 && (
               <div style={{ background:C.white, borderRadius:12, padding:"18px 20px", boxShadow:"0 2px 10px rgba(0,0,0,0.06)", border:`2px solid ${C.orange}`, marginTop:14 }}>
                 <div style={{ fontWeight:700, color:C.orange, marginBottom:12, fontSize:14 }}>
@@ -1152,14 +1146,10 @@ function IVRDashboard() {
 
   const clearAll = useCallback(() => {
     if (!confirm("¿Borrar todo el historial y datos cargados?")) return;
-    // Reset React state immediately
     setMetrics({ PA: null, CR: null });
     setHistory([]);
     setTab("regional");
-    // Overwrite storage with empty — delete alone may not work
-
     try { localStorage.removeItem("ivr_placa_v3"); } catch {}
-    // Force page reload to guarantee clean state
     setTimeout(() => window.location.reload(), 300);
   }, []);
 
