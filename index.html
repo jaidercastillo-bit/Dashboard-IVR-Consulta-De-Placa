@@ -99,19 +99,19 @@ function dateFromFilename(filename) {
 // Cada entrada: [etiqueta visible, [...patrones a buscar en "Nombre destino" (lowercase)]]
 // Se evalúan en orden — el primer match gana.
 const FLOW_MAP = [
-  // ── Nuevos flujos PA ──────────────────────────────────────────────────────
-  // ivr-pa-sura-vPlate-identified-fl  → Cliente identificado por placa
-  ["Cliente identificado por placa",      ["vplate-identified-fl", "suraplate-identified", "suraplateidentified"]],
-  // ivr-pa-sura-vPlate-unknowed-flow  → Cliente no se identifica por placa
-  ["Cliente no se identifica por placa",  ["vplate-unknowed-flow", "unknowed-plate", "plateunidentified", "user-unknowed"]],
-  // ivr-pa-sura-vPlate-nolase-flow    → Cliente no menciona placa
-  ["Cliente no menciona placa",           ["vplate-nolase-flow", "nolase-flow"]],
-  // ivr-pa-sura-cContract-unknowed-f → No se encontró contrato
-  ["No se encontró contrato",             ["ccontract-unknowed"]],
-  // ivr-pa-sura-fallback-flow → Fallback
-  ["Fallback",                            ["fallback-flow"]],
-  // ── Flujos existentes (compatibilidad CR y variantes antiguas PA) ─────────
+  // 1. Cliente identificado por teléfono
   ["Cliente identificado por teléfono",   ["phone-identified"]],
+  // 2. Cliente identificado por placa
+  ["Cliente identificado por placa",      ["vplate-identified-fl", "suraplate-identified", "suraplateidentified"]],
+  // 3. Cliente no menciona placa
+  ["Cliente no menciona placa",           ["vplate-nolase-flow", "nolase-flow"]],
+  // 4. Cliente no se identifica por placa
+  ["Cliente no se identifica por placa",  ["vplate-unknowed-flow", "unknowed-plate", "plateunidentified", "user-unknowed"]],
+  // 5. No se encontró contrato
+  ["No se encontró contrato",             ["ccontract-unknowed"]],
+  // 6. Fallback
+  ["Fallback",                            ["fallback-flow"]],
+  // 7. Inactividad
   ["Inactividad",                         ["inactivity"]],
 ];
 
