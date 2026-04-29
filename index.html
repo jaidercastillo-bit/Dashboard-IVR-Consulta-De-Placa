@@ -609,7 +609,7 @@ function CrossPanel({ history }) {
           horaVb:  vr["Inicio conversación"]||"",
           horaAg:  ar["Hora inicio"]||"",
           finalizado:   vr["Finalizado"]||"",
-          destino: (vr["Nombre destino"]||"").split("-").slice(-2).join(" "),
+          destino: classifyFlow(vr["Nombre destino"]),
           vbDur, agDur, cola,
           totalDur: vbDur + agDur,
           agente:       ar["Agente"]||"",
@@ -642,7 +642,7 @@ function CrossPanel({ history }) {
             fechaVb:fecha, fechaAg:best.ar["callDate"]||"",
             horaVb:vr["Inicio conversación"]||"", horaAg:best.ar["callTime"]||"",
             finalizado:vr["Finalizado"]||"",
-            destino:(vr["Nombre destino"]||"").split("-").slice(-2).join(" "),
+            destino: classifyFlow(vr["Nombre destino"]),
             vbDur, agDur, cola:0, totalDur:vbDur+agDur,
             agente:best.ar["agentNumber"]||best.ar["destination"]||"",
             tipificacion:"", terminadoPor:best.ar["disposition"]||"",
@@ -932,7 +932,7 @@ function CrossPanel({ history }) {
                           <td style={{ padding:"7px 10px", color:C.textMuted }}>{vr["Inicio conversación"]||""}</td>
                           <td style={{ padding:"7px 10px", fontFamily:"'IBM Plex Mono',monospace", color:C.navy }}>{fmtSec(parseSec(vr["Tiempo total"]||""))}</td>
                           <td style={{ padding:"7px 10px", fontSize:10, color:C.textSub }}>{vr["Finalizado"]||""}</td>
-                          <td style={{ padding:"7px 10px", fontSize:10, color:C.textMuted, maxWidth:140, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{(vr["Nombre destino"]||"").split("-").slice(-2).join(" ")}</td>
+                          <td style={{ padding:"7px 10px", fontSize:10, color:C.textMuted, maxWidth:140, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{classifyFlow(vr["Nombre destino"])}</td>
                         </tr>
                       ))}
                     </tbody>
