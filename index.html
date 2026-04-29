@@ -743,48 +743,40 @@ function CrossPanel({ history }) {
         const totVb   = m.reduce((s,r)=>s+r.vbDur,0);
         const totAg   = m.reduce((s,r)=>s+r.agDur,0);
 
+        // ── Agrupación por flujo ──────────────────────────────────────────────
         const byFlow = {};
         m.forEach(r => {
-          const f = r.destino||"Sin destino";
-          if (!byFlow[f]) byFlow[f]={ vDurs:[], aDurs:[] };
+          const f = r.destino || "Sin destino";
+          if (!byFlow[f]) byFlow[f] = { vDurs:[], aDurs:[], totDurs:[], count:0 };
           byFlow[f].vDurs.push(r.vbDur);
           byFlow[f].aDurs.push(r.agDur);
+          byFlow[f].totDurs.push(r.totalDur);
+          byFlow[f].count++;
         });
-        const chartFlowData = Object.entries(byFlow).map(([flow,d])=>({
-          flow: flow.length>20?flow.slice(0,20)+"…":flow,
-          "Voicebot": d.vDurs.length?Math.round(d.vDurs.reduce((a,b)=>a+b,0)/d.vDurs.length):0,
-          "Agente":   d.aDurs.length?Math.round(d.aDurs.reduce((a,b)=>a+b,0)/d.aDurs.length):0,
+
+        const avg = arr => arr.length ? Math.round(arr.reduce((a,b)=>a+b,0)/arr.length) : 0;
+
+        const flowTableData = Object.entries(byFlow)
+          .sort((a,b) => b[1].count - a[1].count)
+          .map(([flow, d]) => ({
+            flow,
+            flowShort: flow.length > 22 ? flow.slice(0,22)+"…" : flow,
+            count:   d.count,
+            avgVb:   avg(d.vDurs),
+            avgAg:   avg(d.aDurs),
+            avgTot:  avg(d.totDurs),
+          }));
+
+        const chartFlowData = flowTableData.map(d => ({
+          flow:      d.flowShort,
+          "🤖 Voicebot": d.avgVb,
+          "👤 Agente":   d.avgAg,
+          "🔵 Total":    d.avgTot,
         }));
-
-        const byAgent = {};
-        m.forEach(r => {
-          const ag = r.agente||"Sin agente";
-          const f  = r.destino||"Sin destino";
-          if (!byAgent[ag]) byAgent[ag] = {};
-          if (!byAgent[ag][f]) byAgent[ag][f] = [];
-          byAgent[ag][f].push(r.agDur);
-        });
-        const agentNames = Object.keys(byAgent);
-        const allFlows   = [...new Set(m.map(r=>r.destino||"Sin destino"))];
-        const chartAgentData = agentNames.map(ag => {
-          const obj = { agente: ag.length>14?ag.slice(0,14)+"…":ag };
-          allFlows.forEach(f => {
-            const durs = byAgent[ag][f]||[];
-            obj[f.length>16?f.slice(0,16)+"…":f] = durs.length?Math.round(durs.reduce((a,b)=>a+b,0)/durs.length):0;
-          });
-          return obj;
-        });
-        const AGENT_COLORS = ["#e05c2a","#f08040","#f5aa70","#d4420a","#c0390a","#b02800","#e8703a"];
-
-        const byAgentTable = {};
-        m.forEach(r => {
-          const ag = r.agente||"Sin agente";
-          if (!byAgentTable[ag]) byAgentTable[ag] = [];
-          byAgentTable[ag].push(r);
-        });
 
         return (
           <div>
+            {/* ── Filtro de fechas ── */}
             <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap", marginBottom:16 }}>
               <span style={{ fontSize:12, color:C.textSub, fontWeight:600 }}>📅 Ver por:</span>
               {availDates.map(d => (
@@ -799,20 +791,20 @@ function CrossPanel({ history }) {
               ))}
             </div>
 
+            {/* ── Promedios globales ── */}
             <div style={{ background:"#f0f7ff", borderRadius:12, padding:"18px 20px", border:`2px solid ${C.navyLight}`, marginBottom:16 }}>
-              <div style={{ fontWeight:700, color:C.navy, marginBottom:14, fontSize:14 }}>📊 Promedios globales — {m.length} llamadas cruzadas{dateFilter!=="all"?` · ${dateFilter}`:""}</div>
+              <div style={{ fontWeight:700, color:C.navy, marginBottom:14, fontSize:14 }}>
+                📊 Promedios globales — {m.length} llamadas cruzadas{dateFilter!=="all"?` · ${dateFilter}`:""}
+              </div>
               <div style={{ display:"flex", gap:12, flexWrap:"wrap" }}>
                 {[
-                  { label:"Llamadas cruzadas", value:m.length,        sub:`de ${result.vbTotal} VB / ${result.agTotal} agente`, accent:C.green, big:true },
-                  { label:"Sin cruce",          value:result.unmatched, sub:"Sin coincidencia",                                 accent:C.textMuted },
-                  { label:"⌀ Tiempo voicebot",  value:fmtSec(avgVb),   sub:"Promedio en VB",                                   accent:C.navy, big:true },
-                  { label:"⌀ Tiempo en cola",   value:fmtSec(avgCola), sub:"Espera antes del agente",                          accent:C.navyMid },
-                  { label:"⌀ Tiempo agente",    value:fmtSec(avgAg),   sub:"Promedio con agente",                              accent:C.orange, big:true },
-                  { label:"⌀ Tiempo total",     value:fmtSec(avgTot),  sub:"VB + agente",                                      accent:"#27ae60", big:true },
-                  { label:"Total acum. VB",      value:fmtSec(totVb),   sub:"Suma VB",                                          accent:C.navy },
-                  { label:"Total acum. agente",  value:fmtSec(totAg),   sub:"Suma agente",                                      accent:C.orange },
+                  { label:"Llamadas cruzadas", value:m.length,        sub:`de ${result.vbTotal} VB / ${result.agTotal} agente`, accent:C.green,    big:true },
+                  { label:"Sin cruce",          value:result.unmatched, sub:"Sin coincidencia",                                  accent:C.textMuted, big:false },
+                  { label:"⌀ VB",               value:fmtSec(avgVb),   sub:"Promedio en voicebot",                              accent:C.navy,      big:true },
+                  { label:"⌀ Agente",            value:fmtSec(avgAg),   sub:"Promedio con agente",                               accent:C.orange,    big:true },
+                  { label:"⌀ Total (VB+Ag)",     value:fmtSec(avgTot),  sub:"Tiempo total promedio",                             accent:"#27ae60",   big:true },
                 ].map((s,i)=>(
-                  <div key={i} style={{ background:C.white, borderRadius:12, padding:s.big?"16px 20px":"12px 16px", boxShadow:"0 2px 10px rgba(0,0,0,0.06)", border:`1px solid ${C.borderLight}`, flex:s.big?"1 1 140px":"1 1 110px" }}>
+                  <div key={i} style={{ background:C.white, borderRadius:12, padding:s.big?"16px 20px":"12px 16px", boxShadow:"0 2px 10px rgba(0,0,0,0.06)", border:`1px solid ${C.borderLight}`, flex:s.big?"1 1 140px":"1 1 100px" }}>
                     <div style={{ fontSize:10, color:C.textMuted, fontWeight:600, textTransform:"uppercase", marginBottom:4 }}>{s.label}</div>
                     <div style={{ fontSize:s.big?26:20, fontWeight:800, color:s.accent, fontFamily:"'IBM Plex Mono',monospace" }}>{s.value}</div>
                     <div style={{ fontSize:10, color:C.textMuted, marginTop:3 }}>{s.sub}</div>
@@ -821,134 +813,81 @@ function CrossPanel({ history }) {
               </div>
             </div>
 
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14, marginBottom:14 }}>
-              <div style={{ background:C.white, borderRadius:12, padding:"18px 20px", boxShadow:"0 2px 10px rgba(0,0,0,0.06)", border:`1px solid ${C.borderLight}` }}>
-                <div style={{ fontWeight:700, color:C.navy, marginBottom:4, fontSize:13 }}>🤖 Tiempo promedio en Voicebot por flujo</div>
-                <div style={{ fontSize:11, color:C.textMuted, marginBottom:14 }}>Duración promedio dentro del voicebot</div>
-                <ResponsiveContainer width="100%" height={220}>
-                  <BarChart data={chartFlowData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#f0f4f8"/>
-                    <XAxis dataKey="flow" tick={{ fontSize:9, fill:C.textMuted }}/>
-                    <YAxis tick={{ fontSize:9, fill:C.textMuted }} tickFormatter={v=>fmtSec(v)}/>
-                    <Tooltip formatter={v=>[fmtSec(v),"Voicebot"]}/>
-                    <Bar dataKey="Voicebot" fill={C.navy} radius={[4,4,0,0]}/>
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-              <div style={{ background:C.white, borderRadius:12, padding:"18px 20px", boxShadow:"0 2px 10px rgba(0,0,0,0.06)", border:`1px solid ${C.borderLight}` }}>
-                <div style={{ fontWeight:700, color:C.orange, marginBottom:4, fontSize:13 }}>👤 Tiempo promedio con Agente por flujo</div>
-                <div style={{ fontSize:11, color:C.textMuted, marginBottom:14 }}>Duración promedio de atención del agente</div>
-                <ResponsiveContainer width="100%" height={220}>
-                  <BarChart data={chartFlowData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#f0f4f8"/>
-                    <XAxis dataKey="flow" tick={{ fontSize:9, fill:C.textMuted }}/>
-                    <YAxis tick={{ fontSize:9, fill:C.textMuted }} tickFormatter={v=>fmtSec(v)}/>
-                    <Tooltip formatter={v=>[fmtSec(v),"Agente"]}/>
-                    <Bar dataKey="Agente" fill={C.orange} radius={[4,4,0,0]}/>
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
+            {/* ── Gráfico agrupado por flujo ── */}
+            <div style={{ background:C.white, borderRadius:12, padding:"18px 20px", boxShadow:"0 2px 10px rgba(0,0,0,0.06)", border:`1px solid ${C.borderLight}`, marginBottom:14 }}>
+              <div style={{ fontWeight:700, color:C.navy, marginBottom:4, fontSize:13 }}>⏱️ Duración promedio por flujo de destino</div>
+              <div style={{ fontSize:11, color:C.textMuted, marginBottom:14 }}>Voicebot · Agente · Total — en segundos promedio por llamada cruzada</div>
+              <ResponsiveContainer width="100%" height={260}>
+                <BarChart data={chartFlowData} margin={{ left:8, right:8, bottom:30 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f4f8"/>
+                  <XAxis dataKey="flow" tick={{ fontSize:9, fill:C.textMuted }} angle={-20} textAnchor="end" interval={0}/>
+                  <YAxis tick={{ fontSize:9, fill:C.textMuted }} tickFormatter={v=>fmtSec(v)}/>
+                  <Tooltip formatter={(v,name)=>[fmtSec(v), name]}/>
+                  <Legend iconType="circle" iconSize={9} wrapperStyle={{ fontSize:11 }}/>
+                  <Bar dataKey="🤖 Voicebot" fill={C.navy}    radius={[3,3,0,0]}/>
+                  <Bar dataKey="👤 Agente"   fill={C.orange}  radius={[3,3,0,0]}/>
+                  <Bar dataKey="🔵 Total"    fill="#27ae60"   radius={[3,3,0,0]}/>
+                </BarChart>
+              </ResponsiveContainer>
             </div>
 
-            {chartAgentData.length > 0 && (
-              <div style={{ background:C.white, borderRadius:12, padding:"18px 20px", boxShadow:"0 2px 10px rgba(0,0,0,0.06)", border:`1px solid ${C.borderLight}`, marginBottom:14 }}>
-                <div style={{ fontWeight:700, color:C.navy, marginBottom:14 }}>👤 Tiempo promedio de llamada por agente y flujo de destino</div>
-                <ResponsiveContainer width="100%" height={260}>
-                  <BarChart data={chartAgentData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#f0f4f8"/>
-                    <XAxis dataKey="agente" tick={{ fontSize:10, fill:C.textMuted }}/>
-                    <YAxis tick={{ fontSize:10, fill:C.textMuted }} tickFormatter={v=>fmtSec(v)}/>
-                    <Tooltip formatter={v=>[fmtSec(v)]}/>
-                    <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize:10 }}/>
-                    {allFlows.map((f,i)=>(
-                      <Bar key={f} dataKey={f.length>16?f.slice(0,16)+"…":f} fill={AGENT_COLORS[i%AGENT_COLORS.length]} radius={[3,3,0,0]}/>
-                    ))}
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            )}
-
-            <div style={{ background:C.white, borderRadius:12, padding:"18px 20px", boxShadow:"0 2px 10px rgba(0,0,0,0.06)", border:`1px solid ${C.borderLight}`, marginBottom:14 }}>
-              <div style={{ fontWeight:700, color:C.navy, marginBottom:14 }}>👤 Resumen por agente</div>
+            {/* ── Tabla resumen por flujo ── */}
+            <div style={{ background:C.white, borderRadius:12, padding:"18px 20px", boxShadow:"0 2px 10px rgba(0,0,0,0.06)", border:`1px solid ${C.borderLight}` }}>
+              <div style={{ fontWeight:700, color:C.navy, marginBottom:14, fontSize:13 }}>📋 Resumen por flujo de destino</div>
               <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
                 <thead>
                   <tr style={{ background:"#f5f8ff" }}>
-                    {["Agente","Llamadas","⌀ Tiempo VB","⌀ Tiempo Agente","⌀ Total","Total acum."].map(h=>(
-                      <th key={h} style={{ padding:"8px 12px", textAlign:"left", color:C.textMuted, fontWeight:600, borderBottom:`1px solid ${C.borderLight}`, whiteSpace:"nowrap", fontSize:11 }}>{h}</th>
+                    {["Flujo de Destino","Llamadas","⌀ Voicebot","⌀ Agente","⌀ Total (VB+Ag)"].map(h=>(
+                      <th key={h} style={{ padding:"9px 14px", textAlign:"left", color:C.textMuted, fontWeight:600, borderBottom:`1px solid ${C.borderLight}`, fontSize:11, whiteSpace:"nowrap" }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {Object.entries(byAgentTable).sort((a,b)=>b[1].length-a[1].length).map(([ag, rows])=>{
-                    const aVb  = Math.round(rows.reduce((s,r)=>s+r.vbDur,0)/rows.length);
-                    const aAg  = Math.round(rows.reduce((s,r)=>s+r.agDur,0)/rows.length);
-                    const aTot = Math.round(rows.reduce((s,r)=>s+r.totalDur,0)/rows.length);
-                    const tTot = rows.reduce((s,r)=>s+r.totalDur,0);
-                    return (
-                      <tr key={ag} style={{ borderBottom:`1px solid ${C.borderLight}` }}
-                        onMouseEnter={e=>e.currentTarget.style.background="#f5f8ff"}
-                        onMouseLeave={e=>e.currentTarget.style.background="white"}>
-                        <td style={{ padding:"8px 12px", fontWeight:700, color:C.navy }}>{ag}</td>
-                        <td style={{ padding:"8px 12px", fontFamily:"'IBM Plex Mono',monospace", color:C.navy }}>{rows.length}</td>
-                        <td style={{ padding:"8px 12px", fontFamily:"'IBM Plex Mono',monospace", color:C.navyMid }}>{fmtSec(aVb)}</td>
-                        <td style={{ padding:"8px 12px", fontFamily:"'IBM Plex Mono',monospace", color:C.orange, fontWeight:700 }}>{fmtSec(aAg)}</td>
-                        <td style={{ padding:"8px 12px", fontFamily:"'IBM Plex Mono',monospace", color:"#27ae60", fontWeight:700 }}>{fmtSec(aTot)}</td>
-                        <td style={{ padding:"8px 12px", fontFamily:"'IBM Plex Mono',monospace", color:C.navy }}>{fmtSec(tTot)}</td>
-                      </tr>
-                    );
-                  })}
+                  {/* Fila de promedios globales */}
+                  <tr style={{ background:"#f0f7ff", borderBottom:`2px solid ${C.navyLight}` }}>
+                    <td style={{ padding:"9px 14px", fontWeight:800, color:C.navy, fontSize:11 }}>⌀ TOTAL GLOBAL</td>
+                    <td style={{ padding:"9px 14px", fontFamily:"'IBM Plex Mono',monospace", fontWeight:800, color:C.navy }}>{m.length}</td>
+                    <td style={{ padding:"9px 14px", fontFamily:"'IBM Plex Mono',monospace", fontWeight:800, color:C.navy }}>{fmtSec(avgVb)}</td>
+                    <td style={{ padding:"9px 14px", fontFamily:"'IBM Plex Mono',monospace", fontWeight:800, color:C.orange }}>{fmtSec(avgAg)}</td>
+                    <td style={{ padding:"9px 14px", fontFamily:"'IBM Plex Mono',monospace", fontWeight:800, color:"#27ae60" }}>{fmtSec(avgTot)}</td>
+                  </tr>
+                  {flowTableData.map((d,i)=>(
+                    <tr key={i} style={{ borderBottom:`1px solid ${C.borderLight}` }}
+                      onMouseEnter={e=>e.currentTarget.style.background="#f5f8ff"}
+                      onMouseLeave={e=>e.currentTarget.style.background="white"}>
+                      <td style={{ padding:"9px 14px", color:C.textSub, fontWeight:600 }}>{d.flow}</td>
+                      <td style={{ padding:"9px 14px", fontFamily:"'IBM Plex Mono',monospace", color:C.navy }}>
+                        {d.count}
+                        <span style={{ marginLeft:6, fontSize:10, color:C.textMuted }}>({((d.count/m.length)*100).toFixed(1)}%)</span>
+                      </td>
+                      <td style={{ padding:"9px 14px" }}>
+                        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                          <div style={{ flex:1, background:C.borderLight, borderRadius:4, height:5 }}>
+                            <div style={{ width:`${Math.min((d.avgVb/(avgVb*2||1))*100,100).toFixed(0)}%`, background:C.navy, borderRadius:4, height:5 }}/>
+                          </div>
+                          <span style={{ fontFamily:"'IBM Plex Mono',monospace", fontSize:11, color:C.navy, fontWeight:700, minWidth:50 }}>{fmtSec(d.avgVb)}</span>
+                        </div>
+                      </td>
+                      <td style={{ padding:"9px 14px" }}>
+                        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                          <div style={{ flex:1, background:C.borderLight, borderRadius:4, height:5 }}>
+                            <div style={{ width:`${Math.min((d.avgAg/(avgAg*2||1))*100,100).toFixed(0)}%`, background:C.orange, borderRadius:4, height:5 }}/>
+                          </div>
+                          <span style={{ fontFamily:"'IBM Plex Mono',monospace", fontSize:11, color:C.orange, fontWeight:700, minWidth:50 }}>{fmtSec(d.avgAg)}</span>
+                        </div>
+                      </td>
+                      <td style={{ padding:"9px 14px" }}>
+                        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                          <div style={{ flex:1, background:C.borderLight, borderRadius:4, height:5 }}>
+                            <div style={{ width:`${Math.min((d.avgTot/(avgTot*2||1))*100,100).toFixed(0)}%`, background:"#27ae60", borderRadius:4, height:5 }}/>
+                          </div>
+                          <span style={{ fontFamily:"'IBM Plex Mono',monospace", fontSize:11, color:"#27ae60", fontWeight:800, minWidth:50 }}>{fmtSec(d.avgTot)}</span>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
-            </div>
-
-            <div style={{ background:C.white, borderRadius:12, padding:"18px 20px", boxShadow:"0 2px 10px rgba(0,0,0,0.06)", border:`1px solid ${C.borderLight}` }}>
-              <div style={{ fontWeight:700, color:C.navy, marginBottom:14 }}>📋 Detalle por llamada ({m.length})</div>
-              <div style={{ overflowX:"auto" }}>
-                <table style={{ width:"100%", borderCollapse:"collapse", fontSize:11 }}>
-                  <thead>
-                    <tr style={{ background:"#f5f8ff" }}>
-                      {["#","Teléfono","Fecha VB","Hora VB","Fecha Ag.","Hora Ag.","Flujo","⏱ VB","🚶 Cola","👤 Agente","🔵 Total","Nombre Agente","Tipificación"].map(h=>(
-                        <th key={h} style={{ padding:"7px 10px", textAlign:"left", color:C.textMuted, fontWeight:600, borderBottom:`1px solid ${C.borderLight}`, whiteSpace:"nowrap", fontSize:10 }}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tr style={{ background:"#f0f7ff", borderBottom:`2px solid ${C.navyLight}` }}>
-                    <td colSpan={7} style={{ padding:"7px 10px", fontWeight:700, color:C.navy, fontSize:11 }}>⌀ PROMEDIOS</td>
-                    <td style={{ padding:"7px 10px", fontFamily:"'IBM Plex Mono',monospace", color:C.navy, fontWeight:800 }}>{fmtSec(avgVb)}</td>
-                    <td style={{ padding:"7px 10px", fontFamily:"'IBM Plex Mono',monospace", color:C.navyMid, fontWeight:800 }}>{fmtSec(avgCola)}</td>
-                    <td style={{ padding:"7px 10px", fontFamily:"'IBM Plex Mono',monospace", color:C.orange, fontWeight:800 }}>{fmtSec(avgAg)}</td>
-                    <td style={{ padding:"7px 10px", fontFamily:"'IBM Plex Mono',monospace", color:"#27ae60", fontWeight:800 }}>{fmtSec(avgTot)}</td>
-                    <td colSpan={2}></td>
-                  </tr>
-                  <tbody>
-                    {m.map((r,i)=>(
-                      <tr key={i} style={{ borderBottom:`1px solid ${C.borderLight}` }}
-                        onMouseEnter={e=>e.currentTarget.style.background="#f5f8ff"}
-                        onMouseLeave={e=>e.currentTarget.style.background="white"}>
-                        <td style={{ padding:"7px 10px", color:C.textMuted }}>{i+1}</td>
-                        <td style={{ padding:"7px 10px", fontFamily:"'IBM Plex Mono',monospace", color:C.navy, fontWeight:600 }}>{r.phone}</td>
-                        <td style={{ padding:"7px 10px", color:C.textSub, fontSize:10 }}>{r.fechaVb}</td>
-                        <td style={{ padding:"7px 10px", color:C.textMuted }}>{r.horaVb}</td>
-                        <td style={{ padding:"7px 10px", color:C.textSub, fontSize:10 }}>{r.fechaAg}</td>
-                        <td style={{ padding:"7px 10px", color:C.textMuted }}>{r.horaAg}</td>
-                        <td style={{ padding:"7px 10px", fontSize:10, color:C.textMuted, maxWidth:110, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r.destino}</td>
-                        <td style={{ padding:"7px 10px", fontFamily:"'IBM Plex Mono',monospace", color:C.navy, fontWeight:700 }}>
-                          {fmtSec(r.vbDur)}
-                          <div style={{ width:`${Math.min((r.vbDur/(avgVb*2||1))*100,100).toFixed(0)}%`, height:3, background:C.navy, borderRadius:2, marginTop:2 }}/>
-                        </td>
-                        <td style={{ padding:"7px 10px", fontFamily:"'IBM Plex Mono',monospace", color:C.navyMid }}>{fmtSec(r.cola)}</td>
-                        <td style={{ padding:"7px 10px", fontFamily:"'IBM Plex Mono',monospace", color:C.orange, fontWeight:700 }}>
-                          {fmtSec(r.agDur)}
-                          <div style={{ width:`${Math.min((r.agDur/(avgAg*2||1))*100,100).toFixed(0)}%`, height:3, background:C.orange, borderRadius:2, marginTop:2 }}/>
-                        </td>
-                        <td style={{ padding:"7px 10px", fontFamily:"'IBM Plex Mono',monospace", color:"#27ae60", fontWeight:800 }}>{fmtSec(r.totalDur)}</td>
-                        <td style={{ padding:"7px 10px", fontSize:10, color:C.textMuted }}>{r.agente}</td>
-                        <td style={{ padding:"7px 10px", fontSize:10, color:C.textMuted, maxWidth:110, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r.tipificacion}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
             </div>
 
             {filteredUnmatched && filteredUnmatched.length > 0 && (
