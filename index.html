@@ -123,6 +123,16 @@ function classifyFlow(nombreDestino) {
   return "Colgada (pendiente funnel)";
 }
 
+// Orden fijo para visualizacion - mismo orden que FLOW_MAP + catch-all al final
+const FLOW_ORDER = [...FLOW_MAP.map(([label]) => label), "Colgada (pendiente funnel)"];
+function sortFlows(entries) {
+  return [...entries].sort((a, b) => {
+    const ia = FLOW_ORDER.indexOf(a[0]);
+    const ib = FLOW_ORDER.indexOf(b[0]);
+    return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
+  });
+}
+
 // ─── METRICS ─────────────────────────────────────────────────────────────────
 function deriveMetrics(rows, filename) {
   if (!rows.length) return null;
@@ -281,7 +291,7 @@ function FlowTable({ flows, flowAvgDur, total }) {
         </tr>
       </thead>
       <tbody>
-        {Object.entries(flows).sort((a, b) => b[1] - a[1]).map(([flow, count]) => (
+        {sortFlows(Object.entries(flows)).map(([flow, count]) => (
           <tr key={flow} style={{ borderBottom: `1px solid ${C.borderLight}` }}>
             <td style={{ padding: "8px 12px", color: C.textSub }}>{flow}</td>
             <td style={{ padding: "8px 12px", fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, color: C.navy }}>{count}</td>
@@ -315,7 +325,7 @@ function CountryPanel({ m }) {
     </div>
   );
 
-  const pd = Object.entries(m.flows).sort((a, b) => b[1] - a[1])
+  const pd = sortFlows(Object.entries(m.flows))
     .map(([name, value], i) => ({ name, value, color: FLOW_COLORS[i % FLOW_COLORS.length] }));
   const flowTotal = pd.reduce((s, d) => s + d.value, 0);
 
