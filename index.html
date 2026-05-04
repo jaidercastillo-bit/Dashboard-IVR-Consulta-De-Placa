@@ -1374,8 +1374,7 @@ function SinVoicebotPanel({ history }) {
 
   // Chart: avg duration — one bar for "Sin VB" baseline + one per VB flow
   const chartData = [
-    { flow: 'Sin voicebot
-(línea base)', durSinVb: noVbAvgDur, durConVb: 0 },
+    { flow: 'Sin voicebot (línea base)', durSinVb: noVbAvgDur, durConVb: 0 },
     ...vbFlowRows.map(r => ({ flow: r.flow.length>18?r.flow.slice(0,18)+'…':r.flow, durSinVb: 0, durConVb: r.avgDur })),
   ];
 
@@ -1531,8 +1530,7 @@ function SinVoicebotPanel({ history }) {
               <ResponsiveContainer width="100%" height={260}>
                 <BarChart margin={{bottom:40, left:8, right:8}}
                   data={[
-                    { flow:'📵 Sin VB
-(base)', dur: noVbAvgDur, type:'novb' },
+                    { flow:'📵 Sin VB (base)', dur: noVbAvgDur, type:'novb' },
                     ...vbFlowRows.map(r=>({ flow: r.flow.length>20?r.flow.slice(0,20)+'…':r.flow, dur: r.avgDur, type:'vb' }))
                   ]}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f0f4f8"/>
@@ -1542,8 +1540,7 @@ function SinVoicebotPanel({ history }) {
                     labelFormatter={l=>l}/>
                   <Bar dataKey="dur" radius={[4,4,0,0]}>
                     {[
-                      { flow:'📵 Sin VB
-(base)', dur: noVbAvgDur, type:'novb' },
+                      { flow:'📵 Sin VB (base)', dur: noVbAvgDur, type:'novb' },
                       ...vbFlowRows.map(r=>({ flow: r.flow, dur: r.avgDur, type:'vb' }))
                     ].map((entry, index) => (
                       <Cell key={index} fill={entry.type==='novb' ? C.orange : C.navy}/>
