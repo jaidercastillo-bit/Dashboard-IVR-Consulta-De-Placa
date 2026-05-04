@@ -150,8 +150,8 @@ function deriveMetrics(rows, filename) {
 function deriveDay(rows, filename, country, fecha) {
   const total = rows.length;
   const voicebot = rows[0]["Voicebot"] || "Desconocido";
-  const filenameDate = dateFromFilename(filename);
-  if (filenameDate) fecha = filenameDate;
+  // Fecha comes directly from the CSV "Fecha" column — filename date is NOT used
+  // (filename may refer to export date, not call date)
 
   const resultados = {};
   rows.forEach(r => { const k = r["Finalizado"] || "Sin dato"; resultados[k] = (resultados[k] || 0) + 1; });
@@ -261,7 +261,7 @@ function mergeMetrics(days) {
   return {
     country: days[0].country, voicebot: days[0].voicebot,
     fecha: fechas.length === 1 ? fechas[0] : `${fechas[0]} → ${fechas[fechas.length - 1]}`,
-    filename: `${days.length} archivo(s)`,
+    filename: days.length === 1 ? days[0].filename : `${days.length} archivo(s)`,
     total, enviados, colgadas, tasaExito, tasaColgada,
     flows, flowAvgDur, hourlyData, avgDur, maxDur,
     minDur: minDur === Infinity ? 0 : minDur, avgDurColgadas,
@@ -1050,15 +1050,15 @@ function ComparePanel({ history }) {
   // ── VB COMPARATOR state ──
   const [vbA, setVbA] = useState([]);   // [mergedMetric, filename, selectedDate]
   const [vbB, setVbB] = useState([]);
-  const [vbDateA, setVbDateA] = useState("all");
-  const [vbDateB, setVbDateB] = useState("all");
+  const [vbDatesA, setVbDatesA] = useState([]); // [] = all dates selected
+  const [vbDatesB, setVbDatesB] = useState([]);
   const fileVbA = useRef(); const fileVbB = useRef();
 
   // ── CROSS COMPARATOR state ──
   const [crossA, setCrossA] = useState(null);
   const [crossB, setCrossB] = useState(null);
-  const [crossDateA, setCrossDateA] = useState("all");
-  const [crossDateB, setCrossDateB] = useState("all");
+  const [crossDatesA, setCrossDatesA] = useState([]); // [] = all
+  const [crossDatesB, setCrossDatesB] = useState([]);
   const [crossAlert, setCrossAlert] = useState(null);
   const fileCA = useRef(); const fileCB = useRef();
 
@@ -1070,15 +1070,15 @@ function ComparePanel({ history }) {
     const rows = parseCSV(await file.text());
     const days = deriveMetrics(rows, file.name);
     if (!days || !days.length) return;
-    if (slot === "A") { setVbA([days, file.name]); setVbDateA("all"); }
-    else              { setVbB([days, file.name]); setVbDateB("all"); }
+    if (slot === "A") { setVbA([days, file.name]); setVbDatesA([]); }
+    else              { setVbB([days, file.name]); setVbDatesB([]); }
   }, []);
 
-  // Get merged metric for a VB slot given its date filter
-  function getVbMetric(slot, dateFilter) {
+  // Get merged metric for a VB slot given selected dates ([] = all)
+  function getVbMetric(slot, selectedDates) {
     const [days] = slot;
     if (!days || !days.length) return null;
-    const filtered = dateFilter === "all" ? days : days.filter(d => d.fecha === dateFilter);
+    const filtered = !selectedDates.length ? days : days.filter(d => selectedDates.includes(d.fecha));
     return filtered.length ? mergeMetrics(filtered) : null;
   }
 
@@ -1087,6 +1087,15 @@ function ComparePanel({ history }) {
     const [days] = slot;
     if (!days) return [];
     return [...new Set(days.map(d => d.fecha))].sort();
+  }
+
+  // Toggle a date in a multi-select array
+  function toggleDate(arr, date, setArr, allDates) {
+    if (date === "all") { setArr([]); return; }
+    const next = arr.includes(date) ? arr.filter(d=>d!==date) : [...arr, date];
+    // If all selected, treat as "all"
+    if (next.length === allDates.length) setArr([]);
+    else setArr(next);
   }
 
   // Load agent report and cross against current history
@@ -1143,14 +1152,14 @@ function ComparePanel({ history }) {
     setTimeout(() => setCrossAlert(null), 5000);
     const label = file.name.replace(/\.csv$/i,"").slice(0,24);
     const dates = [...new Set(matchedRows.map(r=>r.fechaVb).filter(Boolean))].sort();
-    if (slot === "A") { setCrossA({ label, rows: matchedRows, dates }); setCrossDateA("all"); }
-    else              { setCrossB({ label, rows: matchedRows, dates }); setCrossDateB("all"); }
+    if (slot === "A") { setCrossA({ label, rows: matchedRows, dates }); setCrossDatesA([]); }
+    else              { setCrossB({ label, rows: matchedRows, dates }); setCrossDatesB([]); }
   }, [history]);
 
   // Filter cross rows by date
-  function getCrossRows(slot, dateFilter) {
+  function getCrossRows(slot, selectedDates) {
     if (!slot) return [];
-    return dateFilter === "all" ? slot.rows : slot.rows.filter(r => r.fechaVb === dateFilter);
+    return !selectedDates.length ? slot.rows : slot.rows.filter(r => selectedDates.includes(r.fechaVb));
   }
 
   // Compute flow summary from matched rows
@@ -1194,21 +1203,60 @@ function ComparePanel({ history }) {
     );
   }
 
-  // Date selector component
-  function DateSelector({ dates, value, onChange, label }) {
+  // Multi-select range date picker — click individual dates to toggle, "Todas" resets
+  function RangeDatePicker({ allDates, selected, setSelected, accentColor }) {
+    const isAll = !selected.length;
     return (
-      <div style={{ display:"flex", gap:6, flexWrap:"wrap", alignItems:"center", marginTop:10 }}>
-        <span style={{ fontSize:11, color:C.textMuted, fontWeight:600 }}>{label}</span>
+      <div style={{ marginTop:10 }}>
+        <div style={{ fontSize:10, color:C.textMuted, fontWeight:600, textTransform:"uppercase", marginBottom:5 }}>
+          📅 Rango: {isAll ? "Todas las fechas" : selected.sort().join(", ")}
+        </div>
+        <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
+          <button onClick={()=>setSelected([])} style={{
+            background:isAll?(accentColor||C.navyMid):C.white,
+            color:isAll?"white":C.navy,
+            border:isAll?"none":`1px solid ${C.borderLight}`,
+            borderRadius:6, padding:"3px 10px", fontSize:10, fontWeight:600, cursor:"pointer"
+          }}>Todas</button>
+          {allDates.map(d => {
+            const on = selected.includes(d);
+            return (
+              <button key={d} onClick={()=>toggleDate(selected,d,setSelected,allDates)} style={{
+                background: on?(accentColor||C.navy):"#f5f8ff",
+                color: on?"white":C.textSub,
+                border: on?"none":`1px solid ${C.borderLight}`,
+                borderRadius:6, padding:"3px 9px", fontSize:10, fontWeight:600, cursor:"pointer",
+                textDecoration: on?"none":"none",
+              }}>{d}</button>
+            );
+          })}
+        </div>
+        {!isAll && (
+          <div style={{ fontSize:10, color:C.textMuted, marginTop:4 }}>
+            {selected.length} fecha{selected.length!==1?"s":""} seleccionada{selected.length!==1?"s":""}
+            <button onClick={()=>setSelected([])} style={{ marginLeft:8, fontSize:10, color:C.orange, background:"none", border:"none", cursor:"pointer", padding:0, fontWeight:600 }}>
+              × Limpiar
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Single-select date for cross comparator
+  function DateSelector({ dates, value, onChange }) {
+    return (
+      <div style={{ display:"flex", gap:5, flexWrap:"wrap", alignItems:"center", marginTop:8 }}>
         <button onClick={()=>onChange("all")} style={{
-          background: value==="all"?C.navyMid:C.white, color:value==="all"?"white":C.navy,
+          background:value==="all"?C.navyMid:C.white, color:value==="all"?"white":C.navy,
           border:value==="all"?"none":`1px solid ${C.navyLight}`,
-          borderRadius:6, padding:"4px 12px", fontSize:11, fontWeight:600, cursor:"pointer"
+          borderRadius:6, padding:"3px 10px", fontSize:10, fontWeight:600, cursor:"pointer"
         }}>Todas</button>
-        {dates.map(d => (
+        {dates.map(d=>(
           <button key={d} onClick={()=>onChange(d)} style={{
-            background: value===d?C.navy:C.white, color:value===d?"white":C.navy,
-            border:value===d?"none":`1px solid ${C.navyLight}`,
-            borderRadius:6, padding:"4px 10px", fontSize:11, fontWeight:600, cursor:"pointer"
+            background:value===d?C.navy:"#f5f8ff", color:value===d?"white":C.textSub,
+            border:value===d?"none":`1px solid ${C.borderLight}`,
+            borderRadius:6, padding:"3px 9px", fontSize:10, fontWeight:600, cursor:"pointer"
           }}>{d}</button>
         ))}
       </div>
@@ -1216,8 +1264,8 @@ function ComparePanel({ history }) {
   }
 
   // ── Computed values for VB comparator ──
-  const mVbA = getVbMetric(vbA, vbDateA);
-  const mVbB = getVbMetric(vbB, vbDateB);
+  const mVbA = getVbMetric(vbA, vbDatesA);
+  const mVbB = getVbMetric(vbB, vbDatesB);
   const labelA = vbA[1] ? vbA[1].replace(/\.csv$/i,"").slice(0,20) : "Período A";
   const labelB = vbB[1] ? vbB[1].replace(/\.csv$/i,"").slice(0,20) : "Período B";
 
@@ -1240,8 +1288,8 @@ function ComparePanel({ history }) {
   }));
 
   // ── Computed values for Cross comparator ──
-  const rowsA = getCrossRows(crossA, crossDateA);
-  const rowsB = getCrossRows(crossB, crossDateB);
+  const rowsA = getCrossRows(crossA, crossDatesA);
+  const rowsB = getCrossRows(crossB, crossDatesB);
   const cdA = crossFlowData(rowsA);
   const cdB = crossFlowData(rowsB);
   const allCrossFlows = [...new Set([...cdA.map(d=>d.flow), ...cdB.map(d=>d.flow)])];
@@ -1292,20 +1340,22 @@ function ComparePanel({ history }) {
             <div style={{ fontSize:12, color:C.textMuted, marginBottom:16 }}>Carga dos CSVs de voicebot y selecciona el día a comparar en cada uno.</div>
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14 }}>
               {[
-                { slot:"A", color:C.navy,   loaded:vbA, ref:fileVbA, label:labelA, dateVal:vbDateA, setDate:setVbDateA },
-                { slot:"B", color:C.orange, loaded:vbB, ref:fileVbB, label:labelB, dateVal:vbDateB, setDate:setVbDateB },
-              ].map(({slot,color,loaded,ref,label,dateVal,setDate}) => {
+                { slot:"A", color:C.navy,   loaded:vbA, ref:fileVbA, label:labelA, selDates:vbDatesA, setDates:setVbDatesA },
+                { slot:"B", color:C.orange, loaded:vbB, ref:fileVbB, label:labelB, selDates:vbDatesB, setDates:setVbDatesB },
+              ].map(({slot,color,loaded,ref,label,selDates,setDates}) => {
                 const slotDates = getVbDates(loaded);
+                const isAll = !selDates.length;
+                const shown = isAll ? (loaded[0]||[]).reduce((s,d)=>s+d.total,0) : (loaded[0]||[]).filter(d=>selDates.includes(d.fecha)).reduce((s,d)=>s+d.total,0);
                 return (
                   <div key={slot} style={{ background:slot==="A"?"#f0f7ff":"#fff8f0", borderRadius:10, padding:"16px 18px", border:`2px solid ${color}20` }}>
                     <div style={{ fontWeight:700, color, fontSize:13, marginBottom:10 }}>
-                      {slot==="A"?"🔵 Período A (Antes)":"🟠 Período B (Después)"}
+                      {slot==="A"?"🔵 Período A":"🟠 Período B"}
                     </div>
                     {loaded[0] ? (
                       <div style={{ fontSize:12, color:C.textSub }}>
                         <div>📄 <strong>{loaded[1]}</strong></div>
-                        <div style={{ marginTop:4 }}>📞 {loaded[0].reduce((s,d)=>s+d.total,0)} llamadas · {[...new Set(loaded[0].map(d=>d.fecha))].join(", ")}</div>
-                        {slotDates.length > 1 && <DateSelector dates={slotDates} value={dateVal} onChange={setDate} label="📅 Filtrar:" />}
+                        <div style={{ marginTop:4 }}>📞 <strong>{shown}</strong> llamadas · {slotDates.length} día{slotDates.length!==1?"s":""} disponible{slotDates.length!==1?"s":""}</div>
+                        <RangeDatePicker allDates={slotDates} selected={selDates} setSelected={setDates} accentColor={color}/>
                       </div>
                     ) : (
                       <div style={{ fontSize:12, color:C.textMuted, marginBottom:8 }}>Sin archivo cargado</div>
@@ -1324,8 +1374,8 @@ function ComparePanel({ history }) {
             <div>
               {/* Info bar */}
               <div style={{ background:"#f0f7ff", borderRadius:10, padding:"8px 16px", marginBottom:14, fontSize:12, color:C.textSub, display:"flex", gap:20, flexWrap:"wrap" }}>
-                <span>🔵 <strong>{labelA}</strong> — {vbDateA==="all"?"Acumulado":vbDateA} · {mVbA.total} llamadas</span>
-                <span>🟠 <strong>{labelB}</strong> — {vbDateB==="all"?"Acumulado":vbDateB} · {mVbB.total} llamadas</span>
+                <span>🔵 <strong>{labelA}</strong> — {!vbDatesA.length?"Todas las fechas":vbDatesA.sort().join(", ")} · {mVbA.total} llamadas</span>
+                <span>🟠 <strong>{labelB}</strong> — {!vbDatesB.length?"Todas las fechas":vbDatesB.sort().join(", ")} · {mVbB.total} llamadas</span>
               </div>
 
               {/* Chart calls */}
@@ -1420,16 +1470,18 @@ function ComparePanel({ history }) {
             )}
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14 }}>
               {[
-                { slot:"A", color:C.navy,   data:crossA, ref:fileCA, title:"🔵 Antes",    dateVal:crossDateA, setDate:setCrossDateA },
-                { slot:"B", color:C.orange, data:crossB, ref:fileCB, title:"🟠 Después", dateVal:crossDateB, setDate:setCrossDateB },
-              ].map(({slot,color,data,ref,title,dateVal,setDate}) => (
+                { slot:"A", color:C.navy,   data:crossA, ref:fileCA, title:"🔵 Antes",    selDates:crossDatesA, setDates:setCrossDatesA },
+                { slot:"B", color:C.orange, data:crossB, ref:fileCB, title:"🟠 Después", selDates:crossDatesB, setDates:setCrossDatesB },
+              ].map(({slot,color,data,ref,title,selDates,setDates}) => {
+                const shownCount = data ? getCrossRows({rows:data.rows,dates:data.dates}, selDates).length : 0;
+                return (
                 <div key={slot} style={{ background:slot==="A"?"#f0f7ff":"#fff8f0", borderRadius:10, padding:"16px 18px", border:`2px solid ${color}20` }}>
                   <div style={{ fontWeight:700, color, fontSize:13, marginBottom:10 }}>{title}</div>
                   {data ? (
                     <div style={{ fontSize:12, color:C.textSub }}>
                       <div>📄 <strong>{data.label}</strong></div>
-                      <div style={{ marginTop:4 }}>🔗 {data.rows.length} llamadas cruzadas · {data.dates.join(", ")}</div>
-                      {data.dates.length > 1 && <DateSelector dates={data.dates} value={dateVal} onChange={setDate} label="📅 Filtrar:" />}
+                      <div style={{ marginTop:4 }}>🔗 <strong>{shownCount}</strong> de {data.rows.length} llamadas cruzadas</div>
+                      <RangeDatePicker allDates={data.dates} selected={selDates} setSelected={setDates} accentColor={color}/>
                     </div>
                   ) : (
                     <div style={{ fontSize:12, color:C.textMuted, marginBottom:8 }}>Sin archivo cargado</div>
@@ -1439,7 +1491,8 @@ function ComparePanel({ history }) {
                   </button>
                   <input ref={ref} type="file" accept=".csv" onChange={e=>loadCrossFile(e,slot)} style={{display:"none"}}/>
                 </div>
-              ))}
+                );
+              })}
             </div>
           </div>
 
@@ -1455,12 +1508,12 @@ function ComparePanel({ history }) {
                 {/* Global comparison cards */}
                 <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14, marginBottom:14 }}>
                   {[
-                    { label:crossA.label, color:C.navy,   bg:"#f0f7ff", avgVb:gAvgVbA, avgAg:gAvgAgA, avgTot:gAvgTotA, count:rowsA.length, dateFilter:crossDateA },
-                    { label:crossB.label, color:C.orange, bg:"#fff8f0", avgVb:gAvgVbB, avgAg:gAvgAgB, avgTot:gAvgTotB, count:rowsB.length, dateFilter:crossDateB },
+                    { label:crossA.label, color:C.navy,   bg:"#f0f7ff", avgVb:gAvgVbA, avgAg:gAvgAgA, avgTot:gAvgTotA, count:rowsA.length, selDates:crossDatesA },
+                    { label:crossB.label, color:C.orange, bg:"#fff8f0", avgVb:gAvgVbB, avgAg:gAvgAgB, avgTot:gAvgTotB, count:rowsB.length, selDates:crossDatesB },
                   ].map((s,si) => (
                     <div key={si} style={{ background:s.bg, borderRadius:12, padding:"16px 20px", border:`2px solid ${s.color}30` }}>
                       <div style={{ fontWeight:800, color:s.color, marginBottom:10, fontSize:14 }}>
-                        {si===0?"🔵":"🟠"} {s.label} {s.dateFilter!=="all"?`· ${s.dateFilter}`:""}
+                        {si===0?"🔵":"🟠"} {s.label} {s.selDates.length?`· ${s.selDates.sort().join(", ")}`:""}
                       </div>
                       <div style={{ display:"flex", gap:14, flexWrap:"wrap" }}>
                         {[
