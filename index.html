@@ -1272,333 +1272,346 @@ function HistoryPanel({ history }) {
   );
 }
 
-// ─── SIN VOICEBOT PANEL ────────────────────────────────────────────────────
-// Compara un CSV de agente puro (sin voicebot) contra datos con voicebot
-// El CSV sin voicebot solo necesita columnas de duración de llamada y fecha.
-// Columnas soportadas: Duración / duration / Tiempo total / TalkTime
+// ─── SIN VOICEBOT PANEL ──────────────────────────────────────────────────────
+// Compara tiempo total de llamada:
+//   Sin voicebot = duración llamada con agente (CSV reporte agente)
+//   Con voicebot = tiempo en voicebot + tiempo con agente (cruce automático)
 function SinVoicebotPanel({ history }) {
-  const [noVbRows,   setNoVbRows]   = useState([]);
-  const [noVbFile,   setNoVbFile]   = useState('');
-  const [noVbDates,  setNoVbDates]  = useState([]);   // fechas disponibles en CSV sin VB
-  const [selNoVb,    setSelNoVb]    = useState([]);   // fechas seleccionadas sin VB
-  const [selVb,      setSelVb]      = useState([]);   // fechas seleccionadas con VB
-  const [alertMsg,   setAlertMsg]   = useState(null);
-  const fileRef = useRef();
+  // ── Slot A: reporte agente SIN voicebot ──
+  const [rowsA,    setRowsA]    = useState([]);
+  const [fileA,    setFileA]    = useState('');
+  const [datesA,   setDatesA]   = useState([]);
+  const [selA,     setSelA]     = useState([]);
 
-  const avg  = arr => arr.length ? Math.round(arr.reduce((a,b)=>a+b,0)/arr.length) : 0;
+  // ── Slot B: reporte agente CON voicebot (se cruza con history) ──
+  const [rowsB,    setRowsB]    = useState([]);
+  const [fileB,    setFileB]    = useState('');
+  const [datesB,   setDatesB]   = useState([]);
+  const [selB,     setSelB]     = useState([]);
+  const [selVb,    setSelVb]    = useState([]);  // fechas voicebot
+
+  const [alert,    setAlert]    = useState(null);
+  const refA = useRef(); const refB = useRef();
+
+  const avg    = arr => arr.length ? Math.round(arr.reduce((a,b)=>a+b,0)/arr.length) : 0;
   const vbDates = [...new Set(history.map(h=>h.fecha).filter(Boolean))].sort();
 
-  // ── Detect duration column in agent CSV ──
+  // ── Detect duration column ──
   function getDur(row) {
-    const candidates = ['Duración','Duracion','duration','Tiempo total','TalkTime','talk_time','dur'];
-    for (const k of candidates) {
-      const v = row[k] || row[k?.toLowerCase()];
-      if (v) { const s = parseSec(v); if (s > 0) return s; }
-    }
-    // Try any column containing "dur" case-insensitive
     for (const k of Object.keys(row)) {
-      if (k.toLowerCase().includes('dur') || k.toLowerCase().includes('talk')) {
-        const s = parseSec(row[k]);
-        if (s > 0) return s;
+      if (/duraci|duration|tiempo|talktime|talk_time/i.test(k)) {
+        const s = parseSec(row[k]); if (s > 0) return s;
       }
     }
     return 0;
   }
 
   // ── Detect date column ──
-  function getDateCol(row) {
-    const candidates = ['Fecha','fecha','Date','date','callDate','call_date','Día','dia'];
-    for (const k of candidates) {
-      if (row[k]) return row[k].trim();
-    }
+  function getDate(row) {
     for (const k of Object.keys(row)) {
-      if (k.toLowerCase().includes('fecha') || k.toLowerCase().includes('date')) {
-        if (row[k]) return row[k].trim();
-      }
+      if (/^fecha$|^date$|^calldate$|^call_date$|^d.a$/i.test(k)) return (row[k]||'').trim();
     }
     return 'Sin fecha';
   }
 
-  const handleFile = useCallback(async (e) => {
+  // ── Load agent CSV ──
+  const loadFile = useCallback(async (e, slot) => {
     const file = e.target.files[0]; if (!file) return; e.target.value = '';
     const rows = parseCSV(await file.text());
-    if (!rows.length) { setAlertMsg({ type:'error', msg:'Archivo vacío.' }); return; }
-    setNoVbRows(rows);
-    setNoVbFile(file.name);
-    setSelNoVb([]);
-    setSelVb([]);
-    const dates = [...new Set(rows.map(r => getDateCol(r)).filter(d=>d!=='Sin fecha'))].sort();
-    setNoVbDates(dates);
-    const durSample = rows.slice(0,5).map(r=>getDur(r));
-    const hasDur = durSample.some(d=>d>0);
-    setAlertMsg({
-      type: hasDur ? 'success' : 'warning',
-      msg: hasDur
-        ? `✅ ${file.name} · ${rows.length} filas · ${dates.length} fecha${dates.length!==1?'s':''}: ${dates.join(', ')}`
-        : `⚠️ ${file.name} cargado pero no se detectó columna de duración. Columnas: ${Object.keys(rows[0]).join(', ')}`
-    });
-    setTimeout(() => setAlertMsg(null), 7000);
+    if (!rows.length) { setAlert({ type:'error', msg:'Archivo vacío.' }); return; }
+    const dates = [...new Set(rows.map(r => getDate(r)).filter(d=>d&&d!=='Sin fecha'))].sort();
+    const hasDur = rows.slice(0,5).some(r => getDur(r) > 0);
+    if (!hasDur) {
+      setAlert({ type:'warn', msg:`⚠️ No se detectó columna de duración. Columnas: ${Object.keys(rows[0]).join(', ')}` });
+    } else {
+      setAlert({ type:'ok', msg:`✅ ${file.name} · ${rows.length} filas · Fechas: ${dates.join(', ')}` });
+    }
+    setTimeout(() => setAlert(null), 6000);
+    if (slot === 'A') { setRowsA(rows); setFileA(file.name); setDatesA(dates); setSelA([]); }
+    else              { setRowsB(rows); setFileB(file.name); setDatesB(dates); setSelB([]); }
   }, []);
 
-  // ── Filter rows by selected dates ──
-  const noVbFiltered = !selNoVb.length
-    ? noVbRows
-    : noVbRows.filter(r => selNoVb.includes(getDateCol(r)));
+  // ── Filter by date selection ──
+  const filterRows = (rows, sel) =>
+    !sel.length ? rows : rows.filter(r => sel.includes(getDate(r)));
 
-  // ── Stats from agent-only CSV ──
-  const noVbDurs = noVbFiltered.map(r => getDur(r)).filter(d=>d>0);
-  const noVbAvgDur = avg(noVbDurs);
-  const noVbTotal  = noVbFiltered.length;
+  const toggleDate = (sel, setSel, d) =>
+    setSel(sel.includes(d) ? sel.filter(x=>x!==d) : [...sel, d]);
 
-  // ── Stats from voicebot history (filtered by selVb) ──
-  const vbDays = !selVb.length
-    ? history
-    : history.filter(h => selVb.includes(h.fecha));
-  const vbMetric = vbDays.length ? mergeMetrics(vbDays) : null;
+  // ── Stats for Slot A (sin voicebot) ──
+  const filtA    = filterRows(rowsA, selA);
+  const dursA    = filtA.map(r => getDur(r)).filter(d=>d>0);
+  const avgA     = avg(dursA);
+  const totalA   = filtA.length;
 
-  // ── Build flow comparison: VB flows vs agent-only "Sin voicebot" bucket ──
-  const noVbLabelA = selNoVb.length ? selNoVb.join(', ') : 'Sin voicebot (todos)';
-  const vbLabelB   = selVb.length   ? selVb.join(', ')   : 'Con voicebot (todos)';
+  // ── Stats for Slot B (con voicebot) = agente + voicebot cruzado ──
+  // Cross agent rows against VB history rows by phone number
+  const vbDays   = !selVb.length ? history : history.filter(h => selVb.includes(h.fecha));
+  const allVbRows = vbDays.flatMap(h => h._rawRows || []);
 
-  // For agent-only we only have one "flow": all calls together
-  // For VB we have the flow breakdown
-  const vbFlowRows = vbMetric ? Object.entries(vbMetric.flows)
-    .sort((a,b)=>b[1]-a[1])
-    .map(([flow, count]) => ({
+  // Build phone→vbDur index from voicebot rows
+  const vbIndex = {};
+  allVbRows.forEach(vr => {
+    const phone = (vr['Número Contacto']||'').trim();
+    if (!phone) return;
+    if (!vbIndex[phone]) vbIndex[phone] = [];
+    vbIndex[phone].push(parseSec(vr['Tiempo total']||''));
+  });
+
+  // For each agent row in B, find matching VB duration
+  const filtB  = filterRows(rowsB, selB);
+  const crossB = filtB.map(r => {
+    const phone   = (r['Número de contacto']||r['phone']||'').trim();
+    const agDur   = getDur(r);
+    const vbDurs  = vbIndex[phone] || [];
+    const vbDur   = vbDurs.length ? vbDurs[0] : 0;  // take first match
+    return { agDur, vbDur, totalDur: agDur + vbDur, destino: classifyFlow('') };
+  });
+
+  // For flow breakdown: use voicebot rows directly (they have Nombre destino)
+  // Cross them against agent rows for agent duration
+  const agIndexB = {};
+  filtB.forEach((r,i) => {
+    const phone = (r['Número de contacto']||'').trim();
+    if (phone) { if (!agIndexB[phone]) agIndexB[phone] = []; agIndexB[phone].push(i); }
+  });
+  const usedB = new Set();
+  const crossedFlows = allVbRows.map(vr => {
+    const phone  = (vr['Número Contacto']||'').trim();
+    if (!phone) return null;
+    const cands  = (agIndexB[phone]||[]).filter(i=>!usedB.has(i));
+    const agDur  = cands.length ? (usedB.add(cands[0]), getDur(filtB[cands[0]])) : 0;
+    const vbDur  = parseSec(vr['Tiempo total']||'');
+    return { destino: classifyFlow(vr['Nombre destino']), agDur, vbDur, totalDur: vbDur + agDur };
+  }).filter(Boolean);
+
+  // Aggregate by flow
+  const byFlow = {};
+  crossedFlows.forEach(r => {
+    const f = r.destino || 'Sin flujo';
+    if (!byFlow[f]) byFlow[f] = { totals:[], vbs:[], ags:[], count:0 };
+    byFlow[f].totals.push(r.totalDur);
+    byFlow[f].vbs.push(r.vbDur);
+    byFlow[f].ags.push(r.agDur);
+    byFlow[f].count++;
+  });
+
+  const flowRows = Object.entries(byFlow)
+    .sort((a,b) => b[1].count - a[1].count)
+    .map(([flow, d]) => ({
       flow,
-      count,
-      avgDur: vbMetric.flowAvgDur?.[flow] || 0,
-    })) : [];
+      count:    d.count,
+      avgVb:    avg(d.vbs),
+      avgAg:    avg(d.ags),
+      avgTotal: avg(d.totals),
+    }));
 
-  const vbTotalDur = vbMetric ? Number(vbMetric.avgDur) : 0;
+  // Global averages for B
+  const allTotalsB = crossedFlows.map(r=>r.totalDur).filter(d=>d>0);
+  const avgTotalB  = avg(allTotalsB);
+  const totalB     = crossedFlows.length;
 
-  // Chart: avg duration — one bar for "Sin VB" baseline + one per VB flow
+  // If no cross data, fall back to just agent duration from B
+  const avgBFallback = avg(crossB.map(r=>r.agDur).filter(d=>d>0));
+  const displayAvgB  = avgTotalB > 0 ? avgTotalB : avgBFallback;
+  const hasCross     = crossedFlows.length > 0;
+
+  // Delta
+  const delta     = displayAvgB - avgA;
+  const deltaSign = delta > 0;
+  const deltaPct  = avgA > 0 ? ((Math.abs(delta)/avgA)*100).toFixed(1) : null;
+
+  // Chart data: sin VB bar + per-flow bars
   const chartData = [
-    { flow: 'Sin voicebot (línea base)', durSinVb: noVbAvgDur, durConVb: 0 },
-    ...vbFlowRows.map(r => ({ flow: r.flow.length>18?r.flow.slice(0,18)+'…':r.flow, durSinVb: 0, durConVb: r.avgDur })),
+    { flow: 'Sin voicebot', durTotal: avgA, durVb: 0, durAg: avgA },
+    ...flowRows.map(r => ({ flow: r.flow.length>18?r.flow.slice(0,18)+'…':r.flow, durTotal: r.avgTotal, durVb: r.avgVb, durAg: r.avgAg })),
   ];
 
-  // Delta: average VB call vs no-VB call
-  const delta = vbTotalDur - noVbAvgDur;
-  const deltaSign = delta > 0;
+  // Date selector helper
+  function DateBtns({ dates, sel, setSel, color }) {
+    return (
+      <div style={{ display:'flex', gap:5, flexWrap:'wrap', marginTop:8 }}>
+        <button onClick={()=>setSel([])} style={{
+          background:!sel.length?color:'#f5f8ff', color:!sel.length?'white':C.textSub,
+          border:!sel.length?'none':`1px solid ${C.borderLight}`,
+          borderRadius:6, padding:'3px 10px', fontSize:11, fontWeight:600, cursor:'pointer'
+        }}>Todas</button>
+        {dates.map(d => {
+          const on = sel.includes(d);
+          return (
+            <button key={d} onClick={()=>toggleDate(sel,setSel,d)} style={{
+              background:on?color:'#f5f8ff', color:on?'white':C.textSub,
+              border:on?'none':`1px solid ${C.borderLight}`,
+              borderRadius:6, padding:'3px 9px', fontSize:11, fontWeight:600, cursor:'pointer'
+            }}>{d}</button>
+          );
+        })}
+      </div>
+    );
+  }
 
   return (
     <div>
-      {/* Header */}
-      <div style={{ background:C.white, borderRadius:12, padding:'20px 24px', boxShadow:'0 2px 10px rgba(0,0,0,0.06)', border:`1px solid ${C.borderLight}`, marginBottom:16 }}>
-        <div style={{ fontWeight:700, color:C.navy, fontSize:15, marginBottom:6 }}>📵 vs 🤖 Comparar Mes Sin Voicebot vs Con Voicebot</div>
-        <div style={{ fontSize:12, color:C.textMuted, marginBottom:14 }}>
-          Carga el CSV de llamadas directas al agente (antes del voicebot). Se comparará la duración promedio contra los flujos del voicebot cargado en el dashboard principal.
-        </div>
-        <div style={{ fontSize:11, background:'#f5f8ff', borderRadius:6, padding:'6px 12px', marginBottom:14, color:C.textSub }}>
-          📊 Voicebot cargado: <strong>{vbDates.join(', ') || 'ninguno'}</strong> · {history.reduce((s,h)=>s+h.total,0)} llamadas
-        </div>
-        {alertMsg && (
-          <div style={{ background:alertMsg.type==='error'||alertMsg.type==='warning'?C.redBg:C.greenBg, borderLeft:`4px solid ${alertMsg.type==='error'||alertMsg.type==='warning'?C.orange:C.green}`, padding:'9px 14px', fontSize:12, color:alertMsg.type==='error'||alertMsg.type==='warning'?'#c0392b':'#27ae60', fontWeight:600, borderRadius:8, marginBottom:14 }}>
-            {alertMsg.msg}
+      {/* ── Upload cards ── */}
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:16 }}>
+        {[
+          { slot:'A', color:C.orange, bg:'#fff8f0', label:'📵 Sin Voicebot', sub:'Reporte de agente del período SIN voicebot', file:fileA, dates:datesA, sel:selA, setSel:setSelA, ref:refA },
+          { slot:'B', color:C.navy,   bg:'#f0f7ff', label:'🤖 Con Voicebot', sub:'Reporte de agente del período CON voicebot', file:fileB, dates:datesB, sel:selB, setSel:setSelB, ref:refB },
+        ].map(({slot,color,bg,label,sub,file,dates,sel,setSel,ref}) => (
+          <div key={slot} style={{ background:bg, borderRadius:12, padding:'16px 18px', border:`1px solid ${color}30` }}>
+            <div style={{ fontWeight:700, color, fontSize:14, marginBottom:4 }}>{label}</div>
+            <div style={{ fontSize:11, color:C.textMuted, marginBottom:12 }}>{sub}</div>
+            {file ? (
+              <div style={{ fontSize:12, color:C.textSub, marginBottom:8 }}>
+                <div>📄 <strong>{file}</strong></div>
+                <DateBtns dates={dates} sel={sel} setSel={setSel} color={color}/>
+                {sel.length > 0 && (
+                  <div style={{ fontSize:10, color:C.textMuted, marginTop:4 }}>
+                    {sel.length} fecha{sel.length!==1?'s':''} seleccionada{sel.length!==1?'s':''}
+                    <button onClick={()=>setSel([])} style={{ marginLeft:6, color, background:'none', border:'none', cursor:'pointer', fontSize:10, fontWeight:700 }}>× Limpiar</button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div style={{ fontSize:12, color:C.textMuted, marginBottom:8 }}>Sin archivo cargado</div>
+            )}
+            <button onClick={()=>ref.current.click()} style={{ background:color, color:'white', border:'none', borderRadius:7, padding:'7px 16px', fontSize:12, fontWeight:600, cursor:'pointer' }}>
+              📂 {file ? 'Cambiar CSV' : 'Subir reporte agente'}
+            </button>
+            <input ref={ref} type="file" accept=".csv" onChange={e=>loadFile(e,slot)} style={{display:'none'}}/>
           </div>
-        )}
-        <div style={{ display:'flex', gap:10, alignItems:'center', flexWrap:'wrap' }}>
-          <button onClick={()=>fileRef.current.click()} style={{ background:C.navyMid, color:'white', border:'none', borderRadius:8, padding:'9px 18px', fontSize:13, fontWeight:600, cursor:'pointer' }}>
-            📂 Cargar CSV sin voicebot
-          </button>
-          {noVbFile && <span style={{ fontSize:12, color:C.textMuted }}>📄 {noVbFile} · {noVbRows.length} filas</span>}
-          <input ref={fileRef} type="file" accept=".csv" onChange={handleFile} style={{display:'none'}}/>
-        </div>
+        ))}
       </div>
 
-      {noVbRows.length > 0 && (
-        <div>
-          {/* Date selectors side by side */}
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:16 }}>
-            {/* Sin voicebot */}
-            <div style={{ background:'#fff8f0', borderRadius:10, padding:'14px 16px', border:`1px solid ${C.orange}30` }}>
-              <div style={{ fontWeight:700, color:C.orange, fontSize:13, marginBottom:10 }}>📵 Sin voicebot</div>
-              <div style={{ fontSize:11, color:C.textMuted, marginBottom:8 }}>
-                {noVbDates.length} fecha{noVbDates.length!==1?'s':''} disponibles · {noVbTotal} llamadas
-              </div>
-              <div style={{ display:'flex', gap:5, flexWrap:'wrap' }}>
-                <button onClick={()=>setSelNoVb([])} style={{
-                  background:!selNoVb.length?C.orange:C.white, color:!selNoVb.length?'white':C.navy,
-                  border:!selNoVb.length?'none':`1px solid ${C.borderLight}`,
-                  borderRadius:6, padding:'3px 10px', fontSize:11, fontWeight:600, cursor:'pointer'
-                }}>Todas</button>
-                {noVbDates.map(d => {
-                  const cnt = noVbRows.filter(r=>getDateCol(r)===d).length;
-                  const on  = selNoVb.includes(d);
-                  return (
-                    <button key={d} onClick={()=>setSelNoVb(on?selNoVb.filter(x=>x!==d):[...selNoVb,d])} style={{
-                      background:on?C.orange:'#f5f8ff', color:on?'white':C.textSub,
-                      border:on?'none':`1px solid ${C.borderLight}`,
-                      borderRadius:6, padding:'3px 10px', fontSize:11, fontWeight:600, cursor:'pointer'
-                    }}>{d} ({cnt})</button>
-                  );
-                })}
-              </div>
-              {selNoVb.length > 0 && (
-                <div style={{ fontSize:11, color:C.textMuted, marginTop:6 }}>
-                  {selNoVb.length} fecha{selNoVb.length!==1?'s':''} · {noVbFiltered.length} llamadas
-                  <button onClick={()=>setSelNoVb([])} style={{ marginLeft:8, color:C.orange, background:'none', border:'none', cursor:'pointer', fontSize:11, fontWeight:700 }}>× Limpiar</button>
-                </div>
-              )}
-            </div>
-            {/* Con voicebot */}
-            <div style={{ background:'#f0f7ff', borderRadius:10, padding:'14px 16px', border:`1px solid ${C.navy}30` }}>
-              <div style={{ fontWeight:700, color:C.navy, fontSize:13, marginBottom:10 }}>🤖 Con voicebot</div>
-              <div style={{ fontSize:11, color:C.textMuted, marginBottom:8 }}>
-                {vbDates.length} fecha{vbDates.length!==1?'s':''} disponibles · {history.reduce((s,h)=>s+h.total,0)} llamadas
-              </div>
-              <div style={{ display:'flex', gap:5, flexWrap:'wrap' }}>
-                <button onClick={()=>setSelVb([])} style={{
-                  background:!selVb.length?C.navy:C.white, color:!selVb.length?'white':C.navy,
-                  border:!selVb.length?'none':`1px solid ${C.borderLight}`,
-                  borderRadius:6, padding:'3px 10px', fontSize:11, fontWeight:600, cursor:'pointer'
-                }}>Todas</button>
-                {vbDates.map(d => {
-                  const cnt = history.filter(h=>h.fecha===d).reduce((s,h)=>s+h.total,0);
-                  const on  = selVb.includes(d);
-                  return (
-                    <button key={d} onClick={()=>setSelVb(on?selVb.filter(x=>x!==d):[...selVb,d])} style={{
-                      background:on?C.navy:'#f5f8ff', color:on?'white':C.textSub,
-                      border:on?'none':`1px solid ${C.borderLight}`,
-                      borderRadius:6, padding:'3px 10px', fontSize:11, fontWeight:600, cursor:'pointer'
-                    }}>{d} ({cnt})</button>
-                  );
-                })}
-              </div>
-              {selVb.length > 0 && (
-                <div style={{ fontSize:11, color:C.textMuted, marginTop:6 }}>
-                  {selVb.length} fecha{selVb.length!==1?'s':''} · {vbDays.reduce((s,h)=>s+h.total,0)} llamadas
-                  <button onClick={()=>setSelVb([])} style={{ marginLeft:8, color:C.navy, background:'none', border:'none', cursor:'pointer', fontSize:11, fontWeight:700 }}>× Limpiar</button>
-                </div>
-              )}
-            </div>
+      {/* ── VB date selector (for slot B cross) ── */}
+      {rowsB.length > 0 && vbDates.length > 0 && (
+        <div style={{ background:'#f0f7ff', borderRadius:10, padding:'12px 16px', marginBottom:16, border:`1px solid ${C.navyLight}30` }}>
+          <div style={{ fontSize:12, color:C.navy, fontWeight:600, marginBottom:6 }}>
+            🤖 Fechas del voicebot a cruzar con el período B
           </div>
+          <div style={{ fontSize:11, color:C.textMuted, marginBottom:8 }}>
+            El tiempo en voicebot se suma al tiempo del agente para obtener el tiempo total de la llamada.
+          </div>
+          <DateBtns dates={vbDates} sel={selVb} setSel={setSelVb} color={C.navyMid}/>
+        </div>
+      )}
 
-          {/* KPI comparison cards */}
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12, marginBottom:16 }}>
+      {alert && (
+        <div style={{ background:alert.type==='ok'?C.greenBg:C.redBg, borderLeft:`4px solid ${alert.type==='ok'?C.green:C.orange}`, padding:'9px 14px', fontSize:12, color:alert.type==='ok'?'#27ae60':'#c0392b', fontWeight:600, borderRadius:8, marginBottom:14 }}>
+          {alert.msg}
+        </div>
+      )}
+
+      {/* ── Results ── */}
+      {rowsA.length > 0 && rowsB.length > 0 && (
+        <div>
+          {/* KPI cards */}
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12, marginBottom:14 }}>
+            {/* Sin VB */}
             <div style={{ background:'#fff8f0', borderRadius:12, padding:'16px 18px', border:`1px solid ${C.orange}25` }}>
               <div style={{ fontWeight:700, color:C.orange, marginBottom:10, fontSize:13 }}>📵 Sin voicebot</div>
-              <div style={{ display:'flex', gap:14, flexWrap:'wrap' }}>
-                {[{l:'Llamadas', v:noVbTotal},{l:'⌀ Duración', v:fmtSec(noVbAvgDur)}].map((x,i)=>(
-                  <div key={i}>
-                    <div style={{fontSize:10,color:C.textMuted,fontWeight:600,textTransform:'uppercase'}}>{x.l}</div>
-                    <div style={{fontSize:24,fontWeight:800,color:C.orange,fontFamily:"'IBM Plex Mono',monospace"}}>{x.v}</div>
-                  </div>
-                ))}
-              </div>
+              <div style={{ fontSize:10, color:C.textMuted, fontWeight:600, textTransform:'uppercase', marginBottom:4 }}>⌀ Tiempo total llamada</div>
+              <div style={{ fontSize:32, fontWeight:800, color:C.orange, fontFamily:"'IBM Plex Mono',monospace" }}>{fmtSec(avgA)}</div>
+              <div style={{ fontSize:11, color:C.textMuted, marginTop:4 }}>{totalA} llamadas · solo agente</div>
             </div>
+            {/* Con VB */}
             <div style={{ background:'#f0f7ff', borderRadius:12, padding:'16px 18px', border:`1px solid ${C.navy}25` }}>
               <div style={{ fontWeight:700, color:C.navy, marginBottom:10, fontSize:13 }}>🤖 Con voicebot</div>
-              <div style={{ display:'flex', gap:14, flexWrap:'wrap' }}>
-                {[
-                  {l:'Llamadas',    v:vbMetric?.total    || 0},
-                  {l:'⌀ Duración',  v:fmtSec(vbTotalDur)},
-                  {l:'% Completas', v:(vbMetric?.tasaExito||0)+'%'},
-                ].map((x,i)=>(
-                  <div key={i}>
-                    <div style={{fontSize:10,color:C.textMuted,fontWeight:600,textTransform:'uppercase'}}>{x.l}</div>
-                    <div style={{fontSize:24,fontWeight:800,color:C.navy,fontFamily:"'IBM Plex Mono',monospace"}}>{x.v}</div>
-                  </div>
-                ))}
+              <div style={{ fontSize:10, color:C.textMuted, fontWeight:600, textTransform:'uppercase', marginBottom:4 }}>⌀ Tiempo total llamada (VB + Agente)</div>
+              <div style={{ fontSize:32, fontWeight:800, color:C.navy, fontFamily:"'IBM Plex Mono',monospace" }}>{fmtSec(displayAvgB)}</div>
+              <div style={{ fontSize:11, color:C.textMuted, marginTop:4 }}>
+                {hasCross ? `${totalB} llamadas cruzadas` : `${filtB.length} llamadas (solo agente)`}
+                {hasCross && <span style={{ color:C.navyLight }}> · VB + Agente</span>}
               </div>
+              {hasCross && (
+                <div style={{ marginTop:8, fontSize:11, color:C.textMuted }}>
+                  <span style={{ color:C.navy, fontWeight:600 }}>VB: {fmtSec(avg(crossedFlows.map(r=>r.vbDur)))}</span>
+                  {' + '}
+                  <span style={{ color:C.orange, fontWeight:600 }}>Ag: {fmtSec(avg(crossedFlows.map(r=>r.agDur)))}</span>
+                </div>
+              )}
             </div>
-            {/* Delta card */}
-            <div style={{ background: deltaSign ? '#fff0ed' : '#edfff4', borderRadius:12, padding:'16px 18px', border:`1px solid ${deltaSign?C.orange:'#2ecc71'}40` }}>
+            {/* Delta */}
+            <div style={{ background:deltaSign?'#fff0ed':'#edfff4', borderRadius:12, padding:'16px 18px', border:`1px solid ${deltaSign?C.orange:'#2ecc71'}40` }}>
               <div style={{ fontWeight:700, color:deltaSign?C.orange:'#27ae60', marginBottom:10, fontSize:13 }}>
-                {deltaSign ? '▲ Duración aumentó' : '▼ Duración redujo'}
+                {deltaSign ? '▲ Aumentó con voicebot' : '▼ Redujo con voicebot'}
               </div>
-              <div style={{ fontSize:32, fontWeight:800, color:deltaSign?C.orange:'#27ae60', fontFamily:"'IBM Plex Mono',monospace", marginBottom:4 }}>
-                {deltaSign?'+':''}{fmtSec(Math.abs(delta))}
+              <div style={{ fontSize:32, fontWeight:800, color:deltaSign?C.orange:'#27ae60', fontFamily:"'IBM Plex Mono',monospace" }}>
+                {deltaSign?'+':'−'}{fmtSec(Math.abs(delta))}
               </div>
-              <div style={{ fontSize:11, color:C.textMuted }}>
-                {noVbAvgDur > 0 ? `${((Math.abs(delta)/noVbAvgDur)*100).toFixed(1)}% respecto a sin voicebot` : ''}
-              </div>
+              {deltaPct && (
+                <div style={{ fontSize:13, fontWeight:700, color:deltaSign?C.orange:'#27ae60', marginTop:4 }}>
+                  {deltaSign?'+':'−'}{deltaPct}% vs sin voicebot
+                </div>
+              )}
               <div style={{ fontSize:11, color:C.textMuted, marginTop:6 }}>
-                Sin VB: {fmtSec(noVbAvgDur)} → Con VB: {fmtSec(vbTotalDur)}
+                {fmtSec(avgA)} → {fmtSec(displayAvgB)}
               </div>
             </div>
           </div>
 
-          {/* Chart: sin VB baseline vs cada flujo VB */}
-          {vbMetric && (
+          {/* Chart: total call time sin VB vs por flujo con VB */}
+          {hasCross && (
             <div style={{ background:C.white, borderRadius:12, padding:'18px 20px', boxShadow:'0 2px 10px rgba(0,0,0,0.06)', border:`1px solid ${C.borderLight}`, marginBottom:12 }}>
-              <div style={{ fontWeight:700, color:C.navy, marginBottom:4, fontSize:13 }}>⏱️ Duración promedio: Sin voicebot vs flujos con voicebot</div>
-              <div style={{ fontSize:11, color:C.textMuted, marginBottom:14 }}>
-                Barra naranja = línea base sin voicebot. Barras azules = duración promedio de cada flujo de destino con voicebot.
+              <div style={{ fontWeight:700, color:C.navy, marginBottom:4, fontSize:13 }}>
+                ⏱️ Tiempo total de la llamada — Sin voicebot vs Con voicebot por flujo
               </div>
-              <ResponsiveContainer width="100%" height={260}>
-                <BarChart margin={{bottom:40, left:8, right:8}}
-                  data={[
-                    { flow:'📵 Sin VB (base)', dur: noVbAvgDur, type:'novb' },
-                    ...vbFlowRows.map(r=>({ flow: r.flow.length>20?r.flow.slice(0,20)+'…':r.flow, dur: r.avgDur, type:'vb' }))
-                  ]}>
+              <div style={{ fontSize:11, color:C.textMuted, marginBottom:14 }}>
+                Sin voicebot = solo tiempo con agente. Con voicebot = tiempo en voicebot + tiempo con agente.
+                La línea naranja marca la línea base sin voicebot.
+              </div>
+              <ResponsiveContainer width="100%" height={280}>
+                <BarChart data={chartData} margin={{bottom:40,left:8,right:8}}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f0f4f8"/>
                   <XAxis dataKey="flow" tick={{fontSize:9,fill:C.textMuted}} angle={-25} textAnchor="end" interval={0}/>
                   <YAxis tick={{fontSize:9,fill:C.textMuted}} tickFormatter={v=>fmtSec(v)}/>
-                  <Tooltip formatter={(v,n)=>[fmtSec(v),'Duración promedio']}
-                    labelFormatter={l=>l}/>
-                  <Bar dataKey="dur" radius={[4,4,0,0]}>
-                    {[
-                      { flow:'📵 Sin VB (base)', dur: noVbAvgDur, type:'novb' },
-                      ...vbFlowRows.map(r=>({ flow: r.flow, dur: r.avgDur, type:'vb' }))
-                    ].map((entry, index) => (
-                      <Cell key={index} fill={entry.type==='novb' ? C.orange : C.navy}/>
-                    ))}
-                  </Bar>
-                  {noVbAvgDur > 0 && (
-                    <ReferenceLine y={noVbAvgDur} stroke={C.orange} strokeDasharray="6 3" strokeWidth={2}
-                      label={{ value:`Línea base: ${fmtSec(noVbAvgDur)}`, position:'insideTopRight', fontSize:10, fill:C.orange }}/>
-                  )}
+                  <Tooltip formatter={(v,n)=>[fmtSec(v),n]} labelFormatter={l=>l}/>
+                  <Legend iconType="circle" iconSize={8} wrapperStyle={{fontSize:10}}/>
+                  <Bar dataKey="durVb"    name="⌀ Voicebot"  stackId="a" fill={C.navyLight} radius={[0,0,0,0]}/>
+                  <Bar dataKey="durAg"    name="⌀ Agente"    stackId="a" fill={C.navy}      radius={[4,4,0,0]}/>
+                  {avgA > 0 && <ReferenceLine y={avgA} stroke={C.orange} strokeDasharray="6 3" strokeWidth={2}
+                    label={{ value:`Base sin VB: ${fmtSec(avgA)}`, position:'insideTopRight', fontSize:10, fill:C.orange }}/>}
                 </BarChart>
               </ResponsiveContainer>
             </div>
           )}
 
-          {/* Table: flujo por flujo vs sin voicebot */}
-          {vbMetric && (
+          {/* Table: flujo por flujo */}
+          {hasCross && flowRows.length > 0 && (
             <div style={{ background:C.white, borderRadius:12, padding:'18px 20px', boxShadow:'0 2px 10px rgba(0,0,0,0.06)', border:`1px solid ${C.borderLight}` }}>
-              <div style={{ fontWeight:700, color:C.navy, marginBottom:14, fontSize:13 }}>📋 Flujos con voicebot vs línea base sin voicebot</div>
-              <div style={{ fontSize:11, color:C.textMuted, marginBottom:12 }}>
-                Línea base sin voicebot: <strong style={{color:C.orange}}>{fmtSec(noVbAvgDur)}</strong> promedio por llamada ({noVbTotal} llamadas)
+              <div style={{ fontWeight:700, color:C.navy, marginBottom:6, fontSize:13 }}>📋 Tiempo total por flujo vs línea base sin voicebot</div>
+              <div style={{ fontSize:11, color:C.textMuted, marginBottom:14 }}>
+                Línea base sin voicebot: <strong style={{color:C.orange}}>{fmtSec(avgA)}</strong> promedio por llamada
               </div>
               <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
                 <thead>
                   <tr style={{ background:'#f5f8ff' }}>
-                    {['Flujo de destino','Llamadas','% del total','⌀ Con voicebot','⌀ Sin voicebot','Δ Duración','Impacto'].map(h=>(
+                    {['Flujo','Llamadas','⌀ Voicebot','⌀ Agente','⌀ Total','Sin VB (base)','Δ Total','Impacto %'].map(h=>(
                       <th key={h} style={{padding:'9px 12px',textAlign:'left',color:C.textMuted,fontWeight:600,borderBottom:`1px solid ${C.borderLight}`,fontSize:11,whiteSpace:'nowrap'}}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {vbFlowRows.map((row,i)=>{
-                    const d    = row.avgDur - noVbAvgDur;
+                  {flowRows.map((row,i)=>{
+                    const d     = row.avgTotal - avgA;
                     const dSign = d > 0;
-                    const pct  = noVbAvgDur > 0 ? ((Math.abs(d)/noVbAvgDur)*100).toFixed(1) : '—';
+                    const pct   = avgA > 0 ? ((Math.abs(d)/avgA)*100).toFixed(1) : '—';
                     return (
                       <tr key={i} style={{borderBottom:`1px solid ${C.borderLight}`}}
                         onMouseEnter={e=>e.currentTarget.style.background='#f5f8ff'}
                         onMouseLeave={e=>e.currentTarget.style.background='white'}>
                         <td style={{padding:'9px 12px',color:C.textSub,fontWeight:600}}>{row.flow}</td>
                         <td style={{padding:'9px 12px',fontFamily:"'IBM Plex Mono',monospace",color:C.navy}}>{row.count}</td>
-                        <td style={{padding:'9px 12px',fontSize:11,color:C.textMuted}}>
-                          {((row.count/vbMetric.total)*100).toFixed(1)}%
-                        </td>
-                        <td style={{padding:'9px 12px',fontFamily:"'IBM Plex Mono',monospace",fontWeight:700,color:C.navy}}>
-                          {row.avgDur ? fmtSec(row.avgDur) : '—'}
-                        </td>
-                        <td style={{padding:'9px 12px',fontFamily:"'IBM Plex Mono',monospace",color:C.orange}}>
-                          {fmtSec(noVbAvgDur)}
-                        </td>
+                        <td style={{padding:'9px 12px',fontFamily:"'IBM Plex Mono',monospace",color:C.navyLight}}>{row.avgVb?fmtSec(row.avgVb):'—'}</td>
+                        <td style={{padding:'9px 12px',fontFamily:"'IBM Plex Mono',monospace",color:C.navyMid}}>{row.avgAg?fmtSec(row.avgAg):'—'}</td>
+                        <td style={{padding:'9px 12px',fontFamily:"'IBM Plex Mono',monospace",fontWeight:800,color:C.navy}}>{fmtSec(row.avgTotal)}</td>
+                        <td style={{padding:'9px 12px',fontFamily:"'IBM Plex Mono',monospace",color:C.orange}}>{fmtSec(avgA)}</td>
                         <td style={{padding:'9px 12px'}}>
-                          <span style={{fontSize:11,fontWeight:700,
-                            color:dSign?C.orange:'#27ae60',
-                            background:dSign?'#fff0ed':'#edfff4',
-                            borderRadius:20,padding:'2px 9px'}}>
+                          <span style={{fontSize:11,fontWeight:700,color:dSign?C.orange:'#27ae60',background:dSign?'#fff0ed':'#edfff4',borderRadius:20,padding:'2px 9px'}}>
                             {dSign?'▲':'▼'} {fmtSec(Math.abs(d))}
                           </span>
                         </td>
-                        <td style={{padding:'9px 12px',fontSize:11,color:dSign?C.orange:'#27ae60',fontWeight:600}}>
+                        <td style={{padding:'9px 12px',fontSize:12,fontWeight:700,color:dSign?C.orange:'#27ae60'}}>
                           {pct !== '—' ? `${dSign?'+':'−'}${pct}%` : '—'}
                         </td>
                       </tr>
@@ -1608,23 +1621,39 @@ function SinVoicebotPanel({ history }) {
               </table>
             </div>
           )}
+
+          {/* Fallback: no cross data */}
+          {!hasCross && rowsB.length > 0 && (
+            <div style={{ background:'#f5f8ff', borderRadius:10, padding:'16px 20px', border:`1px solid ${C.navyLight}`, textAlign:'center' }}>
+              <div style={{ fontSize:36, marginBottom:8 }}>🔗</div>
+              <div style={{ fontWeight:600, color:C.navy, marginBottom:6 }}>No se encontraron cruces entre el reporte B y el voicebot</div>
+              <div style={{ fontSize:12, color:C.textMuted }}>
+                Asegúrate de que el voicebot esté cargado en la pestaña principal y que los números de teléfono coincidan con el reporte de agente.
+              </div>
+            </div>
+          )}
         </div>
       )}
 
-      {!noVbRows.length && (
-        <div style={{textAlign:'center',padding:60,color:C.textMuted}}>
+      {(!rowsA.length || !rowsB.length) && (
+        <div style={{textAlign:'center',padding:50,color:C.textMuted}}>
           <div style={{fontSize:48,marginBottom:12}}>📵</div>
-          <div style={{fontWeight:600,fontSize:16}}>Carga el CSV de llamadas sin voicebot</div>
-          <div style={{fontSize:13,marginTop:6}}>Solo necesita columnas de fecha y duración de llamada.</div>
-          <div style={{marginTop:14,fontSize:11,background:'#f5f8ff',borderRadius:8,padding:'10px 18px',display:'inline-block',textAlign:'left',color:C.textSub}}>
-            <strong>Columnas de duración aceptadas:</strong><br/>
-            Duración · duration · Tiempo total · TalkTime
+          <div style={{fontWeight:600,fontSize:15}}>Carga los dos reportes de agente para comparar</div>
+          <div style={{fontSize:12,marginTop:6,marginBottom:16}}>
+            Slot A = reporte del período sin voicebot · Slot B = reporte del período con voicebot
+          </div>
+          <div style={{fontSize:11,background:'#f5f8ff',borderRadius:8,padding:'10px 18px',display:'inline-block',textAlign:'left',color:C.textSub,lineHeight:1.8}}>
+            <strong>Cómo funciona:</strong><br/>
+            📵 Slot A: duración de llamada = tiempo total (solo agente)<br/>
+            🤖 Slot B: se cruza con el voicebot cargado en el dashboard<br/>
+            &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Tiempo total = tiempo voicebot + tiempo agente
           </div>
         </div>
       )}
     </div>
   );
 }
+
 
 // ─── COMPARE PANEL ─────────────────────────────────────────────────────
 function ComparePanel({ history }) {
