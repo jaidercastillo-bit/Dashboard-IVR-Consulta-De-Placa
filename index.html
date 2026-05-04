@@ -1546,11 +1546,11 @@ function SinVoicebotPanel({ history }) {
 (base)', dur: noVbAvgDur, type:'novb' },
                       ...vbFlowRows.map(r=>({ flow: r.flow, dur: r.avgDur, type:'vb' }))
                     ].map((entry, index) => (
-                      <Recharts.Cell key={index} fill={entry.type==='novb' ? C.orange : C.navy}/>
+                      <Cell key={index} fill={entry.type==='novb' ? C.orange : C.navy}/>
                     ))}
                   </Bar>
                   {noVbAvgDur > 0 && (
-                    <Recharts.ReferenceLine y={noVbAvgDur} stroke={C.orange} strokeDasharray="6 3" strokeWidth={2}
+                    <ReferenceLine y={noVbAvgDur} stroke={C.orange} strokeDasharray="6 3" strokeWidth={2}
                       label={{ value:`Línea base: ${fmtSec(noVbAvgDur)}`, position:'insideTopRight', fontSize:10, fill:C.orange }}/>
                   )}
                 </BarChart>
