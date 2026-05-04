@@ -410,53 +410,49 @@ function CountryPanel({ m }) {
 
 // ─── COUNTRY VIEW (Acumulado / Por Fecha) ─────────────────────────────────────
 function CountryView({ country, history }) {
-  const [subTab, setSubTab] = useState("acumulado");
-  const [selectedDate, setSelectedDate] = useState("");
+  const [selectedDate, setSelectedDate] = useState("all");
 
   const days = history.filter(h => h.country === country).sort((a, b) => a.fecha.localeCompare(b.fecha));
   const dates = [...new Set(days.map(d => d.fecha))].sort();
 
   if (!days.length) return <CountryPanel m={null} />;
 
-  const accumulated = mergeMetrics(days);
-  const dayMetric = selectedDate ? days.find(d => d.fecha === selectedDate) || null : null;
+  const dayMetric = selectedDate === "all"
+    ? mergeMetrics(days)
+    : mergeMetrics(days.filter(d => d.fecha === selectedDate));
 
   return (
     <div>
-      <div style={{ display: "flex", gap: 8, marginBottom: 18, flexWrap: "wrap", alignItems: "center" }}>
-        {[{ id: "acumulado", label: "📊 Acumulado" }, { id: "fecha", label: "📅 Por Fecha" }].map(s => (
-          <button key={s.id} onClick={() => setSubTab(s.id)} style={{
-            background: subTab === s.id ? C.navyMid : C.white,
-            color: subTab === s.id ? "white" : C.navy,
-            border: subTab === s.id ? "none" : `1px solid ${C.navyLight}`,
-            borderRadius: 8, padding: "7px 18px", fontSize: 13, fontWeight: 600, cursor: "pointer",
-          }}>{s.label}</button>
-        ))}
-        {subTab === "fecha" && (
-          <select value={selectedDate} onChange={e => setSelectedDate(e.target.value)}
-            style={{ border: `1px solid ${C.navyLight}`, borderRadius: 8, padding: "7px 14px", fontSize: 13, color: C.navy, background: C.white, cursor: "pointer" }}>
-            <option value="">— Selecciona una fecha —</option>
-            {dates.map(d => <option key={d} value={d}>{d}</option>)}
-          </select>
-        )}
+      <div style={{ display:"flex", gap:8, marginBottom:18, flexWrap:"wrap", alignItems:"center" }}>
+        <span style={{ fontSize:12, color:C.textSub, fontWeight:600 }}>📅 Ver:</span>
+        <button onClick={() => setSelectedDate("all")} style={{
+          background: selectedDate==="all" ? C.navyMid : C.white,
+          color: selectedDate==="all" ? "white" : C.navy,
+          border: selectedDate==="all" ? "none" : `1px solid ${C.navyLight}`,
+          borderRadius:8, padding:"7px 18px", fontSize:13, fontWeight:600, cursor:"pointer",
+        }}>
+          📊 Acumulado ({days.reduce((s,d)=>s+d.total,0)})
+        </button>
+        {dates.map(d => {
+          const count = days.filter(x=>x.fecha===d).reduce((s,x)=>s+x.total,0);
+          return (
+            <button key={d} onClick={() => setSelectedDate(d)} style={{
+              background: selectedDate===d ? C.navy : C.white,
+              color: selectedDate===d ? "white" : C.navy,
+              border: selectedDate===d ? "none" : `1px solid ${C.navyLight}`,
+              borderRadius:8, padding:"7px 16px", fontSize:12, fontWeight:600, cursor:"pointer",
+            }}>
+              {d} <span style={{ opacity:.7, fontWeight:400 }}>({count})</span>
+            </button>
+          );
+        })}
       </div>
-
-      {subTab === "acumulado" && (
-        <div>
-          <div style={{ background: C.greenBg, borderRadius: 10, padding: "8px 14px", marginBottom: 16, fontSize: 12, color: "#27ae60", fontWeight: 600 }}>
-            ✅ Datos acumulados de {days.length} día{days.length !== 1 ? "s" : ""} · {dates[0]}{dates.length > 1 ? ` → ${dates[dates.length - 1]}` : ""}
-          </div>
-          <CountryPanel m={accumulated} />
+      {selectedDate === "all" && (
+        <div style={{ background:C.greenBg, borderRadius:10, padding:"8px 14px", marginBottom:16, fontSize:12, color:"#27ae60", fontWeight:600 }}>
+          ✅ Acumulado · {dates.length} día{dates.length!==1?"s":""} · {dates[0]}{dates.length>1?` → ${dates[dates.length-1]}`:""}
         </div>
       )}
-      {subTab === "fecha" && !selectedDate && (
-        <div style={{ textAlign: "center", padding: 40, color: C.textMuted }}>
-          <div style={{ fontSize: 36, marginBottom: 10 }}>📅</div>
-          <div style={{ fontWeight: 600 }}>Selecciona una fecha del menú de arriba</div>
-          <div style={{ fontSize: 12, marginTop: 6 }}>Fechas disponibles: {dates.join(", ")}</div>
-        </div>
-      )}
-      {subTab === "fecha" && selectedDate && <CountryPanel m={dayMetric} />}
+      <CountryPanel m={dayMetric} />
     </div>
   );
 }
@@ -1047,67 +1043,77 @@ function HistoryPanel({ history }) {
   );
 }
 
-// ─── COMPARE PANEL ───────────────────────────────────────────────────────────
+// ─── COMPARE PANEL ─────────────────────────────────────────────────────
 function ComparePanel({ history }) {
-  const [subTab, setSubTab]       = useState("vb");
+  const [subTab, setSubTab] = useState("vb");
 
   // ── VB COMPARATOR state ──
-  const [vbA, setVbA] = useState([]);
+  const [vbA, setVbA] = useState([]);   // [mergedMetric, filename, selectedDate]
   const [vbB, setVbB] = useState([]);
+  const [vbDateA, setVbDateA] = useState("all");
+  const [vbDateB, setVbDateB] = useState("all");
   const fileVbA = useRef(); const fileVbB = useRef();
 
   // ── CROSS COMPARATOR state ──
-  const [crossA, setCrossA] = useState(null); // { label, rows: matched[] }
+  const [crossA, setCrossA] = useState(null);
   const [crossB, setCrossB] = useState(null);
+  const [crossDateA, setCrossDateA] = useState("all");
+  const [crossDateB, setCrossDateB] = useState("all");
   const [crossAlert, setCrossAlert] = useState(null);
   const fileCA = useRef(); const fileCB = useRef();
 
-  // ── helpers ──
   const avg = arr => arr.length ? Math.round(arr.reduce((a,b)=>a+b,0)/arr.length) : 0;
 
-  // Load VB CSV for slot A or B
+  // Load VB CSV — store all days so we can filter by date
   const loadVbFile = useCallback(async (e, slot) => {
     const file = e.target.files[0]; if (!file) return; e.target.value = "";
     const rows = parseCSV(await file.text());
     const days = deriveMetrics(rows, file.name);
     if (!days || !days.length) return;
-    const merged = mergeMetrics(days);
-    if (slot === "A") setVbA([merged, file.name]);
-    else              setVbB([merged, file.name]);
+    if (slot === "A") { setVbA([days, file.name]); setVbDateA("all"); }
+    else              { setVbB([days, file.name]); setVbDateB("all"); }
   }, []);
 
-  // Load pre-crossed CSV for cross comparator (expects columns: destino,vbDur,agDur,totalDur)
-  // OR let user paste two agent CSVs and cross against current history
+  // Get merged metric for a VB slot given its date filter
+  function getVbMetric(slot, dateFilter) {
+    const [days] = slot;
+    if (!days || !days.length) return null;
+    const filtered = dateFilter === "all" ? days : days.filter(d => d.fecha === dateFilter);
+    return filtered.length ? mergeMetrics(filtered) : null;
+  }
+
+  // Get unique dates from a VB slot
+  function getVbDates(slot) {
+    const [days] = slot;
+    if (!days) return [];
+    return [...new Set(days.map(d => d.fecha))].sort();
+  }
+
+  // Load agent report and cross against current history
   const loadCrossFile = useCallback(async (e, slot) => {
     const file = e.target.files[0]; if (!file) return; e.target.value = "";
     const rows = parseCSV(await file.text());
     if (!rows.length) return;
-
-    // Auto-detect if it's a voicebot CSV or an agent report
     const headers = Object.keys(rows[0]);
     let matchedRows = [];
 
     if (headers.includes("Nombre destino") && headers.includes("Tiempo total")) {
-      // It's a voicebot CSV — cross against agent rows already in history (use raw rows approach)
-      // Build flow+duration objects directly from VB rows that were "Envío a IVR"
       matchedRows = rows
         .filter(r => (r["Finalizado"]||"") === "Envío a IVR")
         .map(r => ({
+          fechaVb:  (r["Fecha"]||"").trim(),
           destino:  classifyFlow(r["Nombre destino"]),
           vbDur:    parseSec(r["Tiempo total"]||""),
           agDur:    0,
           totalDur: parseSec(r["Tiempo total"]||""),
         }));
-      setCrossAlert(`✅ Slot ${slot}: ${file.name} · ${matchedRows.length} llamadas completadas (solo VB)`);
+      setCrossAlert("✅ Slot " + slot + ": " + file.name + " · " + matchedRows.length + " llamadas (solo VB)");
     } else if (headers.includes("Número de contacto") || headers.includes("callType")) {
-      // Agent report — cross against current history voicebot rows
       const allVbRows = history.flatMap(h => h._rawRows || []);
       if (!allVbRows.length) {
         setCrossAlert("⚠️ Primero carga un CSV de voicebot en la pestaña principal.");
-        setTimeout(() => setCrossAlert(null), 4000);
-        return;
+        setTimeout(() => setCrossAlert(null), 4000); return;
       }
-      const isAgentReport = headers.includes("Número de contacto");
       const agIndex = {};
       rows.forEach((r, i) => {
         const phone = (r["Número de contacto"] || r["source"] || "").trim();
@@ -1123,39 +1129,34 @@ function ComparePanel({ history }) {
         const vbDur = parseSec(vr["Tiempo total"]||"");
         const agDur = parseSec(ar["Duración"]||ar["duration"]||"");
         matchedRows.push({
+          fechaVb:  (vr["Fecha"]||"").trim(),
           destino:  classifyFlow(vr["Nombre destino"]),
           vbDur, agDur, totalDur: vbDur + agDur,
         });
       });
-      setCrossAlert(`✅ Slot ${slot}: ${file.name} · ${matchedRows.length} cruces encontrados`);
+      setCrossAlert("✅ Slot " + slot + ": " + file.name + " · " + matchedRows.length + " cruces");
     } else {
-      setCrossAlert("⚠️ Formato no reconocido. Usa un CSV de voicebot o de agente.");
-      setTimeout(() => setCrossAlert(null), 4000);
-      return;
+      setCrossAlert("⚠️ Formato no reconocido.");
+      setTimeout(() => setCrossAlert(null), 4000); return;
     }
 
     setTimeout(() => setCrossAlert(null), 5000);
-    const label = file.name.replace(/\.csv$/i, "");
-    if (slot === "A") setCrossA({ label, rows: matchedRows });
-    else              setCrossB({ label, rows: matchedRows });
+    const label = file.name.replace(/\.csv$/i,"").slice(0,24);
+    const dates = [...new Set(matchedRows.map(r=>r.fechaVb).filter(Boolean))].sort();
+    if (slot === "A") { setCrossA({ label, rows: matchedRows, dates }); setCrossDateA("all"); }
+    else              { setCrossB({ label, rows: matchedRows, dates }); setCrossDateB("all"); }
   }, [history]);
 
-  // ── Compute VB flow comparison data ──
-  function vbFlowData(mArr) {
-    if (!mArr || !mArr[0]) return [];
-    const m = mArr[0];
-    return Object.entries(m.flows).map(([flow, count]) => ({
-      flow,
-      count,
-      avgDur: m.flowAvgDur?.[flow] || 0,
-    }));
+  // Filter cross rows by date
+  function getCrossRows(slot, dateFilter) {
+    if (!slot) return [];
+    return dateFilter === "all" ? slot.rows : slot.rows.filter(r => r.fechaVb === dateFilter);
   }
 
-  // ── Compute cross flow comparison data ──
-  function crossFlowData(slot) {
-    if (!slot) return [];
+  // Compute flow summary from matched rows
+  function crossFlowData(rows) {
     const byFlow = {};
-    slot.rows.forEach(r => {
+    rows.forEach(r => {
       const f = r.destino || "Sin destino";
       if (!byFlow[f]) byFlow[f] = { vDurs:[], aDurs:[], totDurs:[] };
       byFlow[f].vDurs.push(r.vbDur);
@@ -1171,7 +1172,6 @@ function ComparePanel({ history }) {
     }));
   }
 
-  // ── Build merged chart data (all flows from both slots) ──
   function mergedChartData(dataA, dataB, keyFn) {
     const allFlows = [...new Set([...dataA.map(d=>d.flow), ...dataB.map(d=>d.flow)])];
     return allFlows.map(flow => {
@@ -1181,45 +1181,90 @@ function ComparePanel({ history }) {
     });
   }
 
-  const labelA = vbA[1] ? vbA[1].replace(/\.csv$/i,"").slice(0,20) : "Período A";
-  const labelB = vbB[1] ? vbB[1].replace(/\.csv$/i,"").slice(0,20) : "Período B";
-
-  const vbDataA = vbFlowData(vbA);
-  const vbDataB = vbFlowData(vbB);
-  const vbChart = mergedChartData(vbDataA, vbDataB, (a,b) => ({
-    [`${labelA} — Llamadas`]: a?.count  || 0,
-    [`${labelB} — Llamadas`]: b?.count  || 0,
-    [`${labelA} — ⌀ Dur`]:   a?.avgDur || 0,
-    [`${labelB} — ⌀ Dur`]:   b?.avgDur || 0,
-  }));
-
-  const crossDataA = crossFlowData(crossA);
-  const crossDataB = crossFlowData(crossB);
-  const crossChart = mergedChartData(crossDataA, crossDataB, (a,b) => ({
-    [`${crossA?.label||"Antes"} — VB`]:    a?.avgVb  || 0,
-    [`${crossB?.label||"Después"} — VB`]:  b?.avgVb  || 0,
-    [`${crossA?.label||"Antes"} — Ag`]:    a?.avgAg  || 0,
-    [`${crossB?.label||"Después"} — Ag`]:  b?.avgAg  || 0,
-    [`${crossA?.label||"Antes"} — Total`]: a?.avgTot || 0,
-    [`${crossB?.label||"Después"} — Total`]:b?.avgTot|| 0,
-  }));
-
-  const COLORS_A = [C.navy, C.navyMid, C.navyLight];
-  const COLORS_B = [C.orange, "#f08040", "#f5aa70"];
-
-  // Delta badge
   function Delta({ before, after }) {
-    if (!before || !after) return null;
-    const diff = after - before;
-    const pct  = before ? ((diff / before) * 100).toFixed(1) : null;
+    if (!before && !after) return null;
+    const diff = (after||0) - (before||0);
+    const pct  = before ? ((diff/before)*100).toFixed(1) : null;
     const up   = diff > 0;
     return (
-      <span style={{ fontSize:10, fontWeight:700, color: up ? C.orange : "#27ae60",
-        background: up ? "#fff0ed" : "#edfff4", borderRadius:20, padding:"2px 8px", marginLeft:6 }}>
-        {up ? "▲" : "▼"} {Math.abs(diff)}s {pct ? `(${pct}%)` : ""}
+      <span style={{ fontSize:10, fontWeight:700, color:up?C.orange:"#27ae60",
+        background:up?"#fff0ed":"#edfff4", borderRadius:20, padding:"2px 8px", marginLeft:6 }}>
+        {up?"▲":"▼"} {fmtSec(Math.abs(diff))}{pct?` (${pct}%)`:""}
       </span>
     );
   }
+
+  // Date selector component
+  function DateSelector({ dates, value, onChange, label }) {
+    return (
+      <div style={{ display:"flex", gap:6, flexWrap:"wrap", alignItems:"center", marginTop:10 }}>
+        <span style={{ fontSize:11, color:C.textMuted, fontWeight:600 }}>{label}</span>
+        <button onClick={()=>onChange("all")} style={{
+          background: value==="all"?C.navyMid:C.white, color:value==="all"?"white":C.navy,
+          border:value==="all"?"none":`1px solid ${C.navyLight}`,
+          borderRadius:6, padding:"4px 12px", fontSize:11, fontWeight:600, cursor:"pointer"
+        }}>Todas</button>
+        {dates.map(d => (
+          <button key={d} onClick={()=>onChange(d)} style={{
+            background: value===d?C.navy:C.white, color:value===d?"white":C.navy,
+            border:value===d?"none":`1px solid ${C.navyLight}`,
+            borderRadius:6, padding:"4px 10px", fontSize:11, fontWeight:600, cursor:"pointer"
+          }}>{d}</button>
+        ))}
+      </div>
+    );
+  }
+
+  // ── Computed values for VB comparator ──
+  const mVbA = getVbMetric(vbA, vbDateA);
+  const mVbB = getVbMetric(vbB, vbDateB);
+  const labelA = vbA[1] ? vbA[1].replace(/\.csv$/i,"").slice(0,20) : "Período A";
+  const labelB = vbB[1] ? vbB[1].replace(/\.csv$/i,"").slice(0,20) : "Período B";
+
+  function vbFlowData(m) {
+    if (!m) return [];
+    return Object.entries(m.flows).map(([flow, count]) => ({
+      flow, count, avgDur: m.flowAvgDur?.[flow] || 0,
+    }));
+  }
+
+  const vbDataA = vbFlowData(mVbA);
+  const vbDataB = vbFlowData(mVbB);
+  const vbChartCalls = mergedChartData(vbDataA, vbDataB, (a,b) => ({
+    [labelA]: a?.count  || 0,
+    [labelB]: b?.count  || 0,
+  }));
+  const vbChartDur = mergedChartData(vbDataA, vbDataB, (a,b) => ({
+    [labelA]: a?.avgDur || 0,
+    [labelB]: b?.avgDur || 0,
+  }));
+
+  // ── Computed values for Cross comparator ──
+  const rowsA = getCrossRows(crossA, crossDateA);
+  const rowsB = getCrossRows(crossB, crossDateB);
+  const cdA = crossFlowData(rowsA);
+  const cdB = crossFlowData(rowsB);
+  const allCrossFlows = [...new Set([...cdA.map(d=>d.flow), ...cdB.map(d=>d.flow)])];
+  const chartTot = allCrossFlows.map(flow => {
+    const a = cdA.find(d=>d.flow===flow);
+    const b = cdB.find(d=>d.flow===flow);
+    return {
+      flow: flow.length>22?flow.slice(0,22)+"…":flow,
+      [`${crossA?.label||"Antes"} — Total`]: a?.avgTot||0,
+      [`${crossB?.label||"Después"} — Total`]: b?.avgTot||0,
+    };
+  });
+  const chartVbAg = allCrossFlows.map(flow => {
+    const a = cdA.find(d=>d.flow===flow);
+    const b = cdB.find(d=>d.flow===flow);
+    return {
+      flow: flow.length>22?flow.slice(0,22)+"…":flow,
+      [`${crossA?.label||"Antes"} — VB`]:     a?.avgVb ||0,
+      [`${crossA?.label||"Antes"} — Agente`]: a?.avgAg ||0,
+      [`${crossB?.label||"Después"} — VB`]:     b?.avgVb ||0,
+      [`${crossB?.label||"Después"} — Agente`]: b?.avgAg ||0,
+    };
+  });
 
   return (
     <div>
@@ -1238,90 +1283,94 @@ function ComparePanel({ history }) {
         ))}
       </div>
 
-      {/* ══ VB COMPARATOR ══════════════════════════════════════════════════════ */}
+      {/* ══ VB COMPARATOR ══════════════════════════════════════════════════════════════════════ */}
       {subTab === "vb" && (
         <div>
+          {/* Slot upload cards */}
           <div style={{ background:C.white, borderRadius:12, padding:"20px 24px", boxShadow:"0 2px 10px rgba(0,0,0,0.06)", border:`1px solid ${C.borderLight}`, marginBottom:16 }}>
             <div style={{ fontWeight:700, color:C.navy, fontSize:15, marginBottom:6 }}>📊 Comparar tiempos promedio por flujo de destino</div>
-            <div style={{ fontSize:12, color:C.textMuted, marginBottom:16 }}>Carga dos CSVs de voicebot para comparar sus flujos de destino lado a lado.</div>
+            <div style={{ fontSize:12, color:C.textMuted, marginBottom:16 }}>Carga dos CSVs de voicebot y selecciona el día a comparar en cada uno.</div>
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14 }}>
               {[
-                { slot:"A", color:C.navy,   loaded:vbA, ref:fileVbA, label:labelA },
-                { slot:"B", color:C.orange, loaded:vbB, ref:fileVbB, label:labelB },
-              ].map(({slot,color,loaded,ref,label}) => (
-                <div key={slot} style={{ background: slot==="A"?"#f0f7ff":"#fff8f0", borderRadius:10, padding:"16px 18px", border:`2px solid ${color}20` }}>
-                  <div style={{ fontWeight:700, color, fontSize:13, marginBottom:10 }}>
-                    {slot==="A" ? "🔵 Período A (Antes)" : "🟠 Período B (Después)"}
-                  </div>
-                  {loaded[0] ? (
-                    <div style={{ fontSize:12, color:C.textSub }}>
-                      <div>📄 <strong>{loaded[1]}</strong></div>
-                      <div style={{ marginTop:4 }}>📞 {loaded[0].total} llamadas · 📅 {loaded[0].fecha}</div>
+                { slot:"A", color:C.navy,   loaded:vbA, ref:fileVbA, label:labelA, dateVal:vbDateA, setDate:setVbDateA },
+                { slot:"B", color:C.orange, loaded:vbB, ref:fileVbB, label:labelB, dateVal:vbDateB, setDate:setVbDateB },
+              ].map(({slot,color,loaded,ref,label,dateVal,setDate}) => {
+                const slotDates = getVbDates(loaded);
+                return (
+                  <div key={slot} style={{ background:slot==="A"?"#f0f7ff":"#fff8f0", borderRadius:10, padding:"16px 18px", border:`2px solid ${color}20` }}>
+                    <div style={{ fontWeight:700, color, fontSize:13, marginBottom:10 }}>
+                      {slot==="A"?"🔵 Período A (Antes)":"🟠 Período B (Después)"}
                     </div>
-                  ) : (
-                    <div style={{ fontSize:12, color:C.textMuted, marginBottom:8 }}>Sin archivo cargado</div>
-                  )}
-                  <button onClick={()=>ref.current.click()} style={{ marginTop:10, background:color, color:"white", border:"none", borderRadius:7, padding:"7px 16px", fontSize:12, fontWeight:600, cursor:"pointer" }}>
-                    📂 {loaded[0] ? "Cambiar CSV" : "Subir CSV"}
-                  </button>
-                  <input ref={ref} type="file" accept=".csv" onChange={e=>loadVbFile(e,slot)} style={{display:"none"}}/>
-                </div>
-              ))}
+                    {loaded[0] ? (
+                      <div style={{ fontSize:12, color:C.textSub }}>
+                        <div>📄 <strong>{loaded[1]}</strong></div>
+                        <div style={{ marginTop:4 }}>📞 {loaded[0].reduce((s,d)=>s+d.total,0)} llamadas · {[...new Set(loaded[0].map(d=>d.fecha))].join(", ")}</div>
+                        {slotDates.length > 1 && <DateSelector dates={slotDates} value={dateVal} onChange={setDate} label="📅 Filtrar:" />}
+                      </div>
+                    ) : (
+                      <div style={{ fontSize:12, color:C.textMuted, marginBottom:8 }}>Sin archivo cargado</div>
+                    )}
+                    <button onClick={()=>ref.current.click()} style={{ marginTop:10, background:color, color:"white", border:"none", borderRadius:7, padding:"7px 16px", fontSize:12, fontWeight:600, cursor:"pointer" }}>
+                      📂 {loaded[0] ? "Cambiar CSV" : "Subir CSV"}
+                    </button>
+                    <input ref={ref} type="file" accept=".csv" onChange={e=>loadVbFile(e,slot)} style={{display:"none"}}/>
+                  </div>
+                );
+              })}
             </div>
           </div>
 
-          {vbA[0] && vbB[0] && (
+          {mVbA && mVbB && (
             <div>
-              {/* Chart — llamadas por flujo */}
+              {/* Info bar */}
+              <div style={{ background:"#f0f7ff", borderRadius:10, padding:"8px 16px", marginBottom:14, fontSize:12, color:C.textSub, display:"flex", gap:20, flexWrap:"wrap" }}>
+                <span>🔵 <strong>{labelA}</strong> — {vbDateA==="all"?"Acumulado":vbDateA} · {mVbA.total} llamadas</span>
+                <span>🟠 <strong>{labelB}</strong> — {vbDateB==="all"?"Acumulado":vbDateB} · {mVbB.total} llamadas</span>
+              </div>
+
+              {/* Chart calls */}
               <div style={{ background:C.white, borderRadius:12, padding:"18px 20px", boxShadow:"0 2px 10px rgba(0,0,0,0.06)", border:`1px solid ${C.borderLight}`, marginBottom:14 }}>
                 <div style={{ fontWeight:700, color:C.navy, marginBottom:4, fontSize:13 }}>📞 Llamadas por flujo — comparativa</div>
-                <div style={{ fontSize:11, color:C.textMuted, marginBottom:14 }}>Volumen de llamadas en cada flujo de destino</div>
                 <ResponsiveContainer width="100%" height={240}>
-                  <BarChart data={vbChart} margin={{bottom:30}}>
+                  <BarChart data={vbChartCalls} margin={{bottom:30}}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#f0f4f8"/>
                     <XAxis dataKey="flow" tick={{fontSize:9,fill:C.textMuted}} angle={-20} textAnchor="end" interval={0}/>
                     <YAxis tick={{fontSize:9,fill:C.textMuted}}/>
-                    <Tooltip/>
-                    <Legend iconType="circle" iconSize={8} wrapperStyle={{fontSize:10}}/>
-                    <Bar dataKey={`${labelA} — Llamadas`} fill={C.navy}   radius={[3,3,0,0]}/>
-                    <Bar dataKey={`${labelB} — Llamadas`} fill={C.orange} radius={[3,3,0,0]}/>
+                    <Tooltip/><Legend iconType="circle" iconSize={8} wrapperStyle={{fontSize:10}}/>
+                    <Bar dataKey={labelA} fill={C.navy}   radius={[3,3,0,0]}/>
+                    <Bar dataKey={labelB} fill={C.orange} radius={[3,3,0,0]}/>
                   </BarChart>
                 </ResponsiveContainer>
               </div>
 
-              {/* Chart — duración promedio por flujo */}
+              {/* Chart duration */}
               <div style={{ background:C.white, borderRadius:12, padding:"18px 20px", boxShadow:"0 2px 10px rgba(0,0,0,0.06)", border:`1px solid ${C.borderLight}`, marginBottom:14 }}>
                 <div style={{ fontWeight:700, color:C.navy, marginBottom:4, fontSize:13 }}>⏱️ Duración promedio por flujo — comparativa</div>
-                <div style={{ fontSize:11, color:C.textMuted, marginBottom:14 }}>Segundos promedio dentro del voicebot por flujo</div>
                 <ResponsiveContainer width="100%" height={240}>
-                  <BarChart data={vbChart} margin={{bottom:30}}>
+                  <BarChart data={vbChartDur} margin={{bottom:30}}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#f0f4f8"/>
                     <XAxis dataKey="flow" tick={{fontSize:9,fill:C.textMuted}} angle={-20} textAnchor="end" interval={0}/>
                     <YAxis tick={{fontSize:9,fill:C.textMuted}} tickFormatter={v=>fmtSec(v)}/>
-                    <Tooltip formatter={(v,name)=>[fmtSec(v),name]}/>
-                    <Legend iconType="circle" iconSize={8} wrapperStyle={{fontSize:10}}/>
-                    <Bar dataKey={`${labelA} — ⌀ Dur`} fill={C.navyMid} radius={[3,3,0,0]}/>
-                    <Bar dataKey={`${labelB} — ⌀ Dur`} fill="#f08040"  radius={[3,3,0,0]}/>
+                    <Tooltip formatter={(v,name)=>[fmtSec(v),name]}/><Legend iconType="circle" iconSize={8} wrapperStyle={{fontSize:10}}/>
+                    <Bar dataKey={labelA} fill={C.navyMid} radius={[3,3,0,0]}/>
+                    <Bar dataKey={labelB} fill="#f08040"   radius={[3,3,0,0]}/>
                   </BarChart>
                 </ResponsiveContainer>
               </div>
 
-              {/* Table — side by side per flow */}
+              {/* Table */}
               <div style={{ background:C.white, borderRadius:12, padding:"18px 20px", boxShadow:"0 2px 10px rgba(0,0,0,0.06)", border:`1px solid ${C.borderLight}` }}>
                 <div style={{ fontWeight:700, color:C.navy, marginBottom:14, fontSize:13 }}>📋 Tabla comparativa por flujo</div>
                 <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
                   <thead>
                     <tr style={{ background:"#f5f8ff" }}>
-                      <th style={{ padding:"9px 12px", textAlign:"left", color:C.textMuted, fontWeight:600, borderBottom:`1px solid ${C.borderLight}`, fontSize:11 }}>Flujo</th>
-                      <th style={{ padding:"9px 12px", textAlign:"right", color:C.navy, fontWeight:700, borderBottom:`1px solid ${C.borderLight}`, fontSize:11 }}>🔵 {labelA} — Calls</th>
-                      <th style={{ padding:"9px 12px", textAlign:"right", color:C.navy, fontWeight:700, borderBottom:`1px solid ${C.borderLight}`, fontSize:11 }}>🔵 {labelA} — ⌀ Dur</th>
-                      <th style={{ padding:"9px 12px", textAlign:"right", color:C.orange, fontWeight:700, borderBottom:`1px solid ${C.borderLight}`, fontSize:11 }}>🟠 {labelB} — Calls</th>
-                      <th style={{ padding:"9px 12px", textAlign:"right", color:C.orange, fontWeight:700, borderBottom:`1px solid ${C.borderLight}`, fontSize:11 }}>🟠 {labelB} — ⌀ Dur</th>
-                      <th style={{ padding:"9px 12px", textAlign:"center", color:C.textMuted, fontWeight:600, borderBottom:`1px solid ${C.borderLight}`, fontSize:11 }}>Δ Dur</th>
+                      {["Flujo",`🔵 ${labelA} — Calls`,`🔵 ${labelA} — ⌀ Dur`,`🟠 ${labelB} — Calls`,`🟠 ${labelB} — ⌀ Dur`,"Δ Dur"].map(h=>(
+                        <th key={h} style={{ padding:"9px 12px", textAlign:"left", color:C.textMuted, fontWeight:600, borderBottom:`1px solid ${C.borderLight}`, fontSize:11 }}>{h}</th>
+                      ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {[...new Set([...vbDataA.map(d=>d.flow), ...vbDataB.map(d=>d.flow)])].map((flow,i) => {
+                    {[...new Set([...vbDataA.map(d=>d.flow),...vbDataB.map(d=>d.flow)])].map((flow,i) => {
                       const a = vbDataA.find(d=>d.flow===flow);
                       const b = vbDataB.find(d=>d.flow===flow);
                       return (
@@ -1329,11 +1378,11 @@ function ComparePanel({ history }) {
                           onMouseEnter={e=>e.currentTarget.style.background="#f5f8ff"}
                           onMouseLeave={e=>e.currentTarget.style.background="white"}>
                           <td style={{ padding:"9px 12px", color:C.textSub, fontWeight:600 }}>{flow}</td>
-                          <td style={{ padding:"9px 12px", textAlign:"right", fontFamily:"'IBM Plex Mono',monospace", color:C.navy }}>{a?.count ?? "—"}</td>
-                          <td style={{ padding:"9px 12px", textAlign:"right", fontFamily:"'IBM Plex Mono',monospace", color:C.navyMid, fontWeight:700 }}>{a ? fmtSec(a.avgDur) : "—"}</td>
-                          <td style={{ padding:"9px 12px", textAlign:"right", fontFamily:"'IBM Plex Mono',monospace", color:C.orange }}>{b?.count ?? "—"}</td>
-                          <td style={{ padding:"9px 12px", textAlign:"right", fontFamily:"'IBM Plex Mono',monospace", color:C.orange, fontWeight:700 }}>{b ? fmtSec(b.avgDur) : "—"}</td>
-                          <td style={{ padding:"9px 12px", textAlign:"center" }}>
+                          <td style={{ padding:"9px 12px", fontFamily:"'IBM Plex Mono',monospace", color:C.navy }}>{a?.count??"—"}</td>
+                          <td style={{ padding:"9px 12px", fontFamily:"'IBM Plex Mono',monospace", color:C.navyMid, fontWeight:700 }}>{a?fmtSec(a.avgDur):"—"}</td>
+                          <td style={{ padding:"9px 12px", fontFamily:"'IBM Plex Mono',monospace", color:C.orange }}>{b?.count??"—"}</td>
+                          <td style={{ padding:"9px 12px", fontFamily:"'IBM Plex Mono',monospace", color:C.orange, fontWeight:700 }}>{b?fmtSec(b.avgDur):"—"}</td>
+                          <td style={{ padding:"9px 12px" }}>
                             {a && b ? <Delta before={a.avgDur} after={b.avgDur}/> : "—"}
                           </td>
                         </tr>
@@ -1344,8 +1393,7 @@ function ComparePanel({ history }) {
               </div>
             </div>
           )}
-
-          {(!vbA[0] || !vbB[0]) && (
+          {(!mVbA || !mVbB) && (
             <div style={{ textAlign:"center", padding:50, color:C.textMuted }}>
               <div style={{ fontSize:40, marginBottom:10 }}>📂</div>
               <div style={{ fontWeight:600 }}>Carga los dos CSVs de arriba para ver la comparativa</div>
@@ -1354,33 +1402,34 @@ function ComparePanel({ history }) {
         </div>
       )}
 
-      {/* ══ CROSS COMPARATOR ═══════════════════════════════════════════════════ */}
+      {/* ══ CROSS COMPARATOR ══════════════════════════════════════════════════════════════════════ */}
       {subTab === "cross" && (
         <div>
           <div style={{ background:C.white, borderRadius:12, padding:"20px 24px", boxShadow:"0 2px 10px rgba(0,0,0,0.06)", border:`1px solid ${C.borderLight}`, marginBottom:16 }}>
             <div style={{ fontWeight:700, color:C.navy, fontSize:15, marginBottom:6 }}>🔗 Comparar Cruce VB × Agente — Antes vs Después</div>
             <div style={{ fontSize:12, color:C.textMuted, marginBottom:6 }}>
-              Carga dos reportes de agente (CSV). Se cruzarán automáticamente contra el voicebot cargado en la pestaña principal.
+              Carga dos reportes de agente. Se cruzarán con el voicebot cargado en la pestaña principal. Puedes filtrar por día en cada slot.
             </div>
             <div style={{ fontSize:11, background:"#f5f8ff", borderRadius:6, padding:"6px 10px", marginBottom:16, color:C.textSub }}>
-              📅 Voicebot en memoria: <strong>{[...new Set(history.map(h=>h.fecha))].join(", ") || "ninguno"}</strong> · {history.reduce((s,h)=>s+h.total,0)} llamadas
+              📅 Voicebot en memoria: <strong>{[...new Set(history.map(h=>h.fecha))].join(", ")||"ninguno"}</strong> · {history.reduce((s,h)=>s+h.total,0)} llamadas
             </div>
             {crossAlert && (
-              <div style={{ background:crossAlert.startsWith("⚠️")?C.redBg:C.greenBg, borderLeft:`4px solid ${crossAlert.startsWith("⚠️")?C.orange:C.green}`, padding:"9px 14px", fontSize:12, color:crossAlert.startsWith("⚠️")?"#c0392b":"#27ae60", fontWeight:600, borderRadius:8, marginBottom:14 }}>
+              <div style={{ background:crossAlert.startsWith("⚠")?C.redBg:C.greenBg, borderLeft:`4px solid ${crossAlert.startsWith("⚠")?C.orange:C.green}`, padding:"9px 14px", fontSize:12, color:crossAlert.startsWith("⚠")?"#c0392b":"#27ae60", fontWeight:600, borderRadius:8, marginBottom:14 }}>
                 {crossAlert}
               </div>
             )}
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14 }}>
               {[
-                { slot:"A", color:C.navy,   data:crossA, ref:fileCA, title:"🔵 Antes" },
-                { slot:"B", color:C.orange, data:crossB, ref:fileCB, title:"🟠 Después" },
-              ].map(({slot,color,data,ref,title}) => (
-                <div key={slot} style={{ background: slot==="A"?"#f0f7ff":"#fff8f0", borderRadius:10, padding:"16px 18px", border:`2px solid ${color}20` }}>
+                { slot:"A", color:C.navy,   data:crossA, ref:fileCA, title:"🔵 Antes",    dateVal:crossDateA, setDate:setCrossDateA },
+                { slot:"B", color:C.orange, data:crossB, ref:fileCB, title:"🟠 Después", dateVal:crossDateB, setDate:setCrossDateB },
+              ].map(({slot,color,data,ref,title,dateVal,setDate}) => (
+                <div key={slot} style={{ background:slot==="A"?"#f0f7ff":"#fff8f0", borderRadius:10, padding:"16px 18px", border:`2px solid ${color}20` }}>
                   <div style={{ fontWeight:700, color, fontSize:13, marginBottom:10 }}>{title}</div>
                   {data ? (
                     <div style={{ fontSize:12, color:C.textSub }}>
                       <div>📄 <strong>{data.label}</strong></div>
-                      <div style={{ marginTop:4 }}>🔗 {data.rows.length} llamadas cruzadas</div>
+                      <div style={{ marginTop:4 }}>🔗 {data.rows.length} llamadas cruzadas · {data.dates.join(", ")}</div>
+                      {data.dates.length > 1 && <DateSelector dates={data.dates} value={dateVal} onChange={setDate} label="📅 Filtrar:" />}
                     </div>
                   ) : (
                     <div style={{ fontSize:12, color:C.textMuted, marginBottom:8 }}>Sin archivo cargado</div>
@@ -1394,115 +1443,82 @@ function ComparePanel({ history }) {
             </div>
           </div>
 
-          {crossA && crossB && (()=>{
-            const cdA = crossFlowData(crossA);
-            const cdB = crossFlowData(crossB);
-            const allFlows = [...new Set([...cdA.map(d=>d.flow), ...cdB.map(d=>d.flow)])];
-
-            // Chart data — Total promedio por flujo A vs B
-            const chartTot = allFlows.map(flow => {
-              const a = cdA.find(d=>d.flow===flow);
-              const b = cdB.find(d=>d.flow===flow);
-              return {
-                flow: flow.length>22?flow.slice(0,22)+"…":flow,
-                [`${crossA.label} — Total`]: a?.avgTot || 0,
-                [`${crossB.label} — Total`]: b?.avgTot || 0,
-              };
-            });
-
-            const chartVbAg = allFlows.map(flow => {
-              const a = cdA.find(d=>d.flow===flow);
-              const b = cdB.find(d=>d.flow===flow);
-              return {
-                flow: flow.length>22?flow.slice(0,22)+"…":flow,
-                [`${crossA.label} — VB`]:    a?.avgVb  || 0,
-                [`${crossA.label} — Agente`]:a?.avgAg  || 0,
-                [`${crossB.label} — VB`]:    b?.avgVb  || 0,
-                [`${crossB.label} — Agente`]:b?.avgAg  || 0,
-              };
-            });
-
+          {crossA && crossB && rowsA.length > 0 && rowsB.length > 0 && (()=>{
+            const gAvgVbA  = avg(rowsA.map(r=>r.vbDur));
+            const gAvgAgA  = avg(rowsA.map(r=>r.agDur));
+            const gAvgTotA = avg(rowsA.map(r=>r.totalDur));
+            const gAvgVbB  = avg(rowsB.map(r=>r.vbDur));
+            const gAvgAgB  = avg(rowsB.map(r=>r.agDur));
+            const gAvgTotB = avg(rowsB.map(r=>r.totalDur));
             return (
               <div>
-                {/* Global avg comparison cards */}
+                {/* Global comparison cards */}
                 <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14, marginBottom:14 }}>
-                  {[crossA, crossB].map((slot, si) => {
-                    const cd = si===0?cdA:cdB;
-                    const color = si===0?C.navy:C.orange;
-                    const allRows = slot.rows;
-                    const gAvgVb  = avg(allRows.map(r=>r.vbDur));
-                    const gAvgAg  = avg(allRows.map(r=>r.agDur));
-                    const gAvgTot = avg(allRows.map(r=>r.totalDur));
-                    return (
-                      <div key={si} style={{ background:si===0?"#f0f7ff":"#fff8f0", borderRadius:12, padding:"16px 20px", border:`2px solid ${color}30` }}>
-                        <div style={{ fontWeight:800, color, marginBottom:12, fontSize:14 }}>
-                          {si===0?"🔵":"🟠"} {slot.label}
-                        </div>
-                        <div style={{ display:"flex", gap:14, flexWrap:"wrap" }}>
-                          {[
-                            { label:"Llamadas", value:allRows.length, color:C.navy },
-                            { label:"⌀ VB",     value:fmtSec(gAvgVb),  color:C.navy },
-                            { label:"⌀ Agente", value:fmtSec(gAvgAg),  color },
-                            { label:"⌀ Total",  value:fmtSec(gAvgTot), color:"#27ae60" },
-                          ].map((s,i)=>(
-                            <div key={i}>
-                              <div style={{ fontSize:10, color:C.textMuted, fontWeight:600, textTransform:"uppercase" }}>{s.label}</div>
-                              <div style={{ fontSize:22, fontWeight:800, color:s.color, fontFamily:"'IBM Plex Mono',monospace" }}>{s.value}</div>
-                            </div>
-                          ))}
-                        </div>
-                        {si===1 && crossA && (()=>{
-                          const rA = crossA.rows;
-                          const rB = crossB.rows;
-                          const dTot = avg(rB.map(r=>r.totalDur)) - avg(rA.map(r=>r.totalDur));
-                          const dAg  = avg(rB.map(r=>r.agDur))    - avg(rA.map(r=>r.agDur));
-                          return (
-                            <div style={{ marginTop:12, paddingTop:10, borderTop:`1px solid #fde8d0` }}>
-                              <div style={{ fontSize:11, color:C.textMuted, fontWeight:600, marginBottom:6 }}>Δ vs Antes</div>
-                              <div style={{ display:"flex", gap:10 }}>
-                                <span style={{ fontSize:12, fontWeight:700, color:dTot>0?C.orange:"#27ae60", background:dTot>0?"#fff0ed":"#edfff4", borderRadius:20, padding:"3px 10px" }}>
-                                  Total {dTot>0?"▲":"▼"} {fmtSec(Math.abs(dTot))}
-                                </span>
-                                <span style={{ fontSize:12, fontWeight:700, color:dAg>0?C.orange:"#27ae60", background:dAg>0?"#fff0ed":"#edfff4", borderRadius:20, padding:"3px 10px" }}>
-                                  Agente {dAg>0?"▲":"▼"} {fmtSec(Math.abs(dAg))}
-                                </span>
-                              </div>
-                            </div>
-                          );
-                        })()}
+                  {[
+                    { label:crossA.label, color:C.navy,   bg:"#f0f7ff", avgVb:gAvgVbA, avgAg:gAvgAgA, avgTot:gAvgTotA, count:rowsA.length, dateFilter:crossDateA },
+                    { label:crossB.label, color:C.orange, bg:"#fff8f0", avgVb:gAvgVbB, avgAg:gAvgAgB, avgTot:gAvgTotB, count:rowsB.length, dateFilter:crossDateB },
+                  ].map((s,si) => (
+                    <div key={si} style={{ background:s.bg, borderRadius:12, padding:"16px 20px", border:`2px solid ${s.color}30` }}>
+                      <div style={{ fontWeight:800, color:s.color, marginBottom:10, fontSize:14 }}>
+                        {si===0?"🔵":"🟠"} {s.label} {s.dateFilter!=="all"?`· ${s.dateFilter}`:""}
                       </div>
-                    );
-                  })}
+                      <div style={{ display:"flex", gap:14, flexWrap:"wrap" }}>
+                        {[
+                          { l:"Llamadas", v:s.count,          c:C.navy },
+                          { l:"⌀ VB",      v:fmtSec(s.avgVb),  c:C.navy },
+                          { l:"⌀ Agente",  v:fmtSec(s.avgAg),  c:s.color },
+                          { l:"⌀ Total",   v:fmtSec(s.avgTot), c:"#27ae60" },
+                        ].map((x,i)=>(
+                          <div key={i}>
+                            <div style={{ fontSize:10, color:C.textMuted, fontWeight:600, textTransform:"uppercase" }}>{x.l}</div>
+                            <div style={{ fontSize:22, fontWeight:800, color:x.c, fontFamily:"'IBM Plex Mono',monospace" }}>{x.v}</div>
+                          </div>
+                        ))}
+                      </div>
+                      {si===1 && (
+                        <div style={{ marginTop:10, paddingTop:8, borderTop:`1px solid #fde8d0` }}>
+                          <div style={{ fontSize:11, color:C.textMuted, fontWeight:600, marginBottom:6 }}>Δ vs Antes</div>
+                          <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+                            <span style={{ fontSize:12, fontWeight:700, color:(gAvgTotB-gAvgTotA)>0?C.orange:"#27ae60", background:(gAvgTotB-gAvgTotA)>0?"#fff0ed":"#edfff4", borderRadius:20, padding:"3px 10px" }}>
+                              Total {(gAvgTotB-gAvgTotA)>0?"▲":"▼"} {fmtSec(Math.abs(gAvgTotB-gAvgTotA))}
+                            </span>
+                            <span style={{ fontSize:12, fontWeight:700, color:(gAvgAgB-gAvgAgA)>0?C.orange:"#27ae60", background:(gAvgAgB-gAvgAgA)>0?"#fff0ed":"#edfff4", borderRadius:20, padding:"3px 10px" }}>
+                              Agente {(gAvgAgB-gAvgAgA)>0?"▲":"▼"} {fmtSec(Math.abs(gAvgAgB-gAvgAgA))}
+                            </span>
+                            <span style={{ fontSize:12, fontWeight:700, color:(gAvgVbB-gAvgVbA)>0?C.orange:"#27ae60", background:(gAvgVbB-gAvgVbA)>0?"#fff0ed":"#edfff4", borderRadius:20, padding:"3px 10px" }}>
+                              VB {(gAvgVbB-gAvgVbA)>0?"▲":"▼"} {fmtSec(Math.abs(gAvgVbB-gAvgVbA))}
+                            </span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
                 </div>
 
-                {/* Chart — Total por flujo */}
+                {/* Chart Total */}
                 <div style={{ background:C.white, borderRadius:12, padding:"18px 20px", boxShadow:"0 2px 10px rgba(0,0,0,0.06)", border:`1px solid ${C.borderLight}`, marginBottom:14 }}>
                   <div style={{ fontWeight:700, color:C.navy, marginBottom:4, fontSize:13 }}>⏱️ Tiempo total promedio por flujo — Antes vs Después</div>
-                  <div style={{ fontSize:11, color:C.textMuted, marginBottom:14 }}>VB + Agente combinados</div>
                   <ResponsiveContainer width="100%" height={240}>
                     <BarChart data={chartTot} margin={{bottom:30}}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#f0f4f8"/>
                       <XAxis dataKey="flow" tick={{fontSize:9,fill:C.textMuted}} angle={-20} textAnchor="end" interval={0}/>
                       <YAxis tick={{fontSize:9,fill:C.textMuted}} tickFormatter={v=>fmtSec(v)}/>
-                      <Tooltip formatter={(v,name)=>[fmtSec(v),name]}/>
-                      <Legend iconType="circle" iconSize={8} wrapperStyle={{fontSize:10}}/>
+                      <Tooltip formatter={(v,name)=>[fmtSec(v),name]}/><Legend iconType="circle" iconSize={8} wrapperStyle={{fontSize:10}}/>
                       <Bar dataKey={`${crossA.label} — Total`} fill={C.navy}   radius={[3,3,0,0]}/>
                       <Bar dataKey={`${crossB.label} — Total`} fill={C.orange} radius={[3,3,0,0]}/>
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
 
-                {/* Chart — VB y Agente separados por flujo */}
+                {/* Chart VB+Agente */}
                 <div style={{ background:C.white, borderRadius:12, padding:"18px 20px", boxShadow:"0 2px 10px rgba(0,0,0,0.06)", border:`1px solid ${C.borderLight}`, marginBottom:14 }}>
-                  <div style={{ fontWeight:700, color:C.navy, marginBottom:4, fontSize:13 }}>🤖👤 VB y Agente por flujo — Antes vs Después</div>
-                  <div style={{ fontSize:11, color:C.textMuted, marginBottom:14 }}>Desglose del tiempo en cada etapa</div>
+                  <div style={{ fontWeight:700, color:C.navy, marginBottom:4, fontSize:13 }}>🤖👥 VB y Agente por flujo — Antes vs Después</div>
                   <ResponsiveContainer width="100%" height={260}>
                     <BarChart data={chartVbAg} margin={{bottom:30}}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#f0f4f8"/>
                       <XAxis dataKey="flow" tick={{fontSize:9,fill:C.textMuted}} angle={-20} textAnchor="end" interval={0}/>
                       <YAxis tick={{fontSize:9,fill:C.textMuted}} tickFormatter={v=>fmtSec(v)}/>
-                      <Tooltip formatter={(v,name)=>[fmtSec(v),name]}/>
-                      <Legend iconType="circle" iconSize={8} wrapperStyle={{fontSize:10}}/>
+                      <Tooltip formatter={(v,name)=>[fmtSec(v),name]}/><Legend iconType="circle" iconSize={8} wrapperStyle={{fontSize:10}}/>
                       <Bar dataKey={`${crossA.label} — VB`}     fill={C.navy}    radius={[3,3,0,0]}/>
                       <Bar dataKey={`${crossA.label} — Agente`} fill={C.navyMid} radius={[3,3,0,0]}/>
                       <Bar dataKey={`${crossB.label} — VB`}     fill={C.orange}  radius={[3,3,0,0]}/>
@@ -1511,23 +1527,25 @@ function ComparePanel({ history }) {
                   </ResponsiveContainer>
                 </div>
 
-                {/* Table — por flujo con delta */}
+                {/* Table */}
                 <div style={{ background:C.white, borderRadius:12, padding:"18px 20px", boxShadow:"0 2px 10px rgba(0,0,0,0.06)", border:`1px solid ${C.borderLight}` }}>
                   <div style={{ fontWeight:700, color:C.navy, marginBottom:14, fontSize:13 }}>📋 Tabla comparativa por flujo</div>
                   <table style={{ width:"100%", borderCollapse:"collapse", fontSize:11 }}>
                     <thead>
                       <tr style={{ background:"#f5f8ff" }}>
-                        {["Flujo","Calls A","Calls B",`🔵 VB A`,`🔵 Ag A`,`🔵 Total A`,`🟠 VB B`,`🟠 Ag B`,`🟠 Total B`,"Δ Total","Δ Agente"].map(h=>(
+                        {["Flujo","Calls A","Calls B","🔵 VB A","🔵 Ag A","🔵 Total A","🟠 VB B","🟠 Ag B","🟠 Total B","Δ Total","Δ Agente"].map(h=>(
                           <th key={h} style={{ padding:"8px 10px", textAlign:"left", color:C.textMuted, fontWeight:600, borderBottom:`1px solid ${C.borderLight}`, fontSize:10, whiteSpace:"nowrap" }}>{h}</th>
                         ))}
                       </tr>
                     </thead>
                     <tbody>
-                      {allFlows.map((flow,i) => {
+                      {allCrossFlows.map((flow,i) => {
                         const a = cdA.find(d=>d.flow===flow);
                         const b = cdB.find(d=>d.flow===flow);
-                        const dTot = a && b ? b.avgTot - a.avgTot : null;
-                        const dAg  = a && b ? b.avgAg  - a.avgAg  : null;
+                        const dTot = a&&b?b.avgTot-a.avgTot:null;
+                        const dAg  = a&&b?b.avgAg-a.avgAg:null;
+                        const dVb  = a&&b?b.avgVb-a.avgVb:null;
+                        const badge = (d) => d!=null ? <span style={{ fontSize:10, fontWeight:700, color:d>0?C.orange:"#27ae60", background:d>0?"#fff0ed":"#edfff4", borderRadius:20, padding:"2px 7px" }}>{d>0?"▲":"▼"} {fmtSec(Math.abs(d))}</span> : "—";
                         return (
                           <tr key={i} style={{ borderBottom:`1px solid ${C.borderLight}` }}
                             onMouseEnter={e=>e.currentTarget.style.background="#f5f8ff"}
@@ -1541,12 +1559,8 @@ function ComparePanel({ history }) {
                             <td style={{ padding:"8px 10px", fontFamily:"'IBM Plex Mono',monospace", color:"#f08040" }}>{b?fmtSec(b.avgVb):"—"}</td>
                             <td style={{ padding:"8px 10px", fontFamily:"'IBM Plex Mono',monospace", color:"#f08040" }}>{b?fmtSec(b.avgAg):"—"}</td>
                             <td style={{ padding:"8px 10px", fontFamily:"'IBM Plex Mono',monospace", color:C.orange, fontWeight:700 }}>{b?fmtSec(b.avgTot):"—"}</td>
-                            <td style={{ padding:"8px 10px" }}>
-                              {dTot!=null ? <span style={{ fontSize:11, fontWeight:700, color:dTot>0?C.orange:"#27ae60", background:dTot>0?"#fff0ed":"#edfff4", borderRadius:20, padding:"2px 8px" }}>{dTot>0?"▲":"▼"} {fmtSec(Math.abs(dTot))}</span> : "—"}
-                            </td>
-                            <td style={{ padding:"8px 10px" }}>
-                              {dAg!=null ? <span style={{ fontSize:11, fontWeight:700, color:dAg>0?C.orange:"#27ae60", background:dAg>0?"#fff0ed":"#edfff4", borderRadius:20, padding:"2px 8px" }}>{dAg>0?"▲":"▼"} {fmtSec(Math.abs(dAg))}</span> : "—"}
-                            </td>
+                            <td style={{ padding:"8px 10px" }}>{badge(dTot)}</td>
+                            <td style={{ padding:"8px 10px" }}>{badge(dAg)}</td>
                           </tr>
                         );
                       })}
@@ -1569,7 +1583,6 @@ function ComparePanel({ history }) {
     </div>
   );
 }
-
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 function IVRDashboard() {
   const [tab, setTab] = useState("regional");
