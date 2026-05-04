@@ -411,51 +411,280 @@ function CountryPanel({ m }) {
 // ─── COUNTRY VIEW (Acumulado / Por Fecha) ─────────────────────────────────────
 function CountryView({ country, history }) {
   const [selectedDate, setSelectedDate] = useState("all");
+  const [cmpMode, setCmpMode]           = useState(false);
+  const [cmpA, setCmpA]                 = useState([]);   // array of fecha strings
+  const [cmpB, setCmpB]                 = useState([]);
 
-  const days = history.filter(h => h.country === country).sort((a, b) => a.fecha.localeCompare(b.fecha));
+  const days  = history.filter(h => h.country === country).sort((a,b) => a.fecha.localeCompare(b.fecha));
   const dates = [...new Set(days.map(d => d.fecha))].sort();
 
   if (!days.length) return <CountryPanel m={null} />;
 
-  const dayMetric = selectedDate === "all"
-    ? mergeMetrics(days)
-    : mergeMetrics(days.filter(d => d.fecha === selectedDate));
+  // Helper: merge days for a set of dates ([] = all)
+  const metricFor = (sel) => {
+    const filtered = !sel.length ? days : days.filter(d => sel.includes(d.fecha));
+    return filtered.length ? mergeMetrics(filtered) : null;
+  };
+
+  const mainMetric = selectedDate === "all"
+    ? metricFor([])
+    : metricFor([selectedDate]);
+
+  // ── Flow comparator helpers ──
+  const toggleSel = (arr, setArr, date) => {
+    setArr(arr.includes(date) ? arr.filter(x=>x!==date) : [...arr, date]);
+  };
+
+  const mA = metricFor(cmpA);
+  const mB = metricFor(cmpB);
+
+  const flowCompareData = () => {
+    if (!mA || !mB) return [];
+    const allFlows = [...new Set([...Object.keys(mA.flows), ...Object.keys(mB.flows)])];
+    return allFlows.map(flow => ({
+      flow,
+      countA:  mA.flows[flow]  || 0,
+      countB:  mB.flows[flow]  || 0,
+      durA:    mA.flowAvgDur?.[flow] || 0,
+      durB:    mB.flowAvgDur?.[flow] || 0,
+    })).sort((a,b) => (b.countA+b.countB) - (a.countA+a.countB));
+  };
+
+  const fcData = flowCompareData();
+  const chartData = fcData.map(d => ({
+    flow: d.flow.length > 20 ? d.flow.slice(0,20)+'…' : d.flow,
+    [cmpA.length ? cmpA.join(', ') : 'Período A']: d.durA,
+    [cmpB.length ? cmpB.join(', ') : 'Período B']: d.durB,
+  }));
+  const labelA = cmpA.length ? cmpA.join(', ') : 'Período A';
+  const labelB = cmpB.length ? cmpB.join(', ') : 'Período B';
+
+  const avg = arr => arr.length ? Math.round(arr.reduce((a,b)=>a+b,0)/arr.length) : 0;
 
   return (
     <div>
-      <div style={{ display:"flex", gap:8, marginBottom:18, flexWrap:"wrap", alignItems:"center" }}>
-        <span style={{ fontSize:12, color:C.textSub, fontWeight:600 }}>📅 Ver:</span>
-        <button onClick={() => setSelectedDate("all")} style={{
-          background: selectedDate==="all" ? C.navyMid : C.white,
-          color: selectedDate==="all" ? "white" : C.navy,
-          border: selectedDate==="all" ? "none" : `1px solid ${C.navyLight}`,
-          borderRadius:8, padding:"7px 18px", fontSize:13, fontWeight:600, cursor:"pointer",
-        }}>
-          📊 Acumulado ({days.reduce((s,d)=>s+d.total,0)})
-        </button>
-        {dates.map(d => {
-          const count = days.filter(x=>x.fecha===d).reduce((s,x)=>s+x.total,0);
-          return (
-            <button key={d} onClick={() => setSelectedDate(d)} style={{
-              background: selectedDate===d ? C.navy : C.white,
-              color: selectedDate===d ? "white" : C.navy,
-              border: selectedDate===d ? "none" : `1px solid ${C.navyLight}`,
-              borderRadius:8, padding:"7px 16px", fontSize:12, fontWeight:600, cursor:"pointer",
-            }}>
-              {d} <span style={{ opacity:.7, fontWeight:400 }}>({count})</span>
-            </button>
-          );
-        })}
+      {/* ── Mode selector ── */}
+      <div style={{ display:'flex', gap:8, marginBottom:18, flexWrap:'wrap', alignItems:'center' }}>
+        <button onClick={()=>setCmpMode(false)} style={{
+          background: !cmpMode ? C.navyMid : C.white,
+          color: !cmpMode ? 'white' : C.navy,
+          border: !cmpMode ? 'none' : `1px solid ${C.navyLight}`,
+          borderRadius:8, padding:'7px 18px', fontSize:13, fontWeight:600, cursor:'pointer',
+        }}>📊 Ver por fecha</button>
+        <button onClick={()=>setCmpMode(true)} style={{
+          background: cmpMode ? C.navyMid : C.white,
+          color: cmpMode ? 'white' : C.navy,
+          border: cmpMode ? 'none' : `1px solid ${C.navyLight}`,
+          borderRadius:8, padding:'7px 18px', fontSize:13, fontWeight:600, cursor:'pointer',
+        }}>⚖️ Comparar rangos</button>
       </div>
-      {selectedDate === "all" && (
-        <div style={{ background:C.greenBg, borderRadius:10, padding:"8px 14px", marginBottom:16, fontSize:12, color:"#27ae60", fontWeight:600 }}>
-          ✅ Acumulado · {dates.length} día{dates.length!==1?"s":""} · {dates[0]}{dates.length>1?` → ${dates[dates.length-1]}`:""}
+
+      {/* ════ VER POR FECHA ════ */}
+      {!cmpMode && (
+        <div>
+          {/* Date buttons */}
+          <div style={{ display:'flex', gap:6, flexWrap:'wrap', alignItems:'center', marginBottom:16 }}>
+            <span style={{ fontSize:11, color:C.textMuted, fontWeight:600 }}>📅</span>
+            <button onClick={()=>setSelectedDate('all')} style={{
+              background: selectedDate==='all' ? C.navy : C.white,
+              color: selectedDate==='all' ? 'white' : C.navy,
+              border: selectedDate==='all' ? 'none' : `1px solid ${C.navyLight}`,
+              borderRadius:7, padding:'5px 14px', fontSize:12, fontWeight:600, cursor:'pointer',
+            }}>
+              Acumulado <span style={{opacity:.7,fontWeight:400}}>({days.reduce((s,d)=>s+d.total,0)})</span>
+            </button>
+            {dates.map(d => {
+              const cnt = days.filter(x=>x.fecha===d).reduce((s,x)=>s+x.total,0);
+              return (
+                <button key={d} onClick={()=>setSelectedDate(d)} style={{
+                  background: selectedDate===d ? C.navyMid : '#f5f8ff',
+                  color: selectedDate===d ? 'white' : C.textSub,
+                  border: selectedDate===d ? 'none' : `1px solid ${C.borderLight}`,
+                  borderRadius:7, padding:'5px 12px', fontSize:12, fontWeight:600, cursor:'pointer',
+                }}>
+                  {d} <span style={{opacity:.7,fontWeight:400}}>({cnt})</span>
+                </button>
+              );
+            })}
+          </div>
+          {selectedDate === 'all' && (
+            <div style={{ background:C.greenBg, borderRadius:8, padding:'7px 14px', marginBottom:14, fontSize:12, color:'#27ae60', fontWeight:600 }}>
+              ✅ Acumulado · {dates.length} día{dates.length!==1?'s':''} · {dates[0]}{dates.length>1?` → ${dates[dates.length-1]}`:''}
+            </div>
+          )}
+          <CountryPanel m={mainMetric} />
         </div>
       )}
-      <CountryPanel m={dayMetric} />
+
+      {/* ════ COMPARAR RANGOS ════ */}
+      {cmpMode && (
+        <div>
+          {/* Selector de fechas A y B */}
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:16 }}>
+            {[
+              { label:'🔵 Rango A', sel:cmpA, setSel:setCmpA, color:C.navy,   bg:'#f0f7ff' },
+              { label:'🟠 Rango B', sel:cmpB, setSel:setCmpB, color:C.orange, bg:'#fff8f0' },
+            ].map(({label,sel,setSel,color,bg}) => (
+              <div key={label} style={{ background:bg, borderRadius:10, padding:'14px 16px', border:`1px solid ${color}30` }}>
+                <div style={{ fontWeight:700, color, fontSize:13, marginBottom:10 }}>{label}</div>
+                <div style={{ display:'flex', gap:5, flexWrap:'wrap' }}>
+                  <button onClick={()=>setSel([])} style={{
+                    background: !sel.length ? color : C.white,
+                    color: !sel.length ? 'white' : C.navy,
+                    border: !sel.length ? 'none' : `1px solid ${C.borderLight}`,
+                    borderRadius:6, padding:'3px 10px', fontSize:11, fontWeight:600, cursor:'pointer',
+                  }}>Todos</button>
+                  {dates.map(d => {
+                    const on = sel.includes(d);
+                    const cnt = days.filter(x=>x.fecha===d).reduce((s,x)=>s+x.total,0);
+                    return (
+                      <button key={d} onClick={()=>toggleSel(sel,setSel,d)} style={{
+                        background: on ? color : '#f5f8ff',
+                        color: on ? 'white' : C.textSub,
+                        border: on ? 'none' : `1px solid ${C.borderLight}`,
+                        borderRadius:6, padding:'3px 10px', fontSize:11, fontWeight:600, cursor:'pointer',
+                      }}>
+                        {d} ({cnt})
+                      </button>
+                    );
+                  })}
+                </div>
+                {sel.length > 0 && (
+                  <div style={{ fontSize:11, color:C.textMuted, marginTop:6 }}>
+                    {sel.length} fecha{sel.length!==1?'s':''} · {metricFor(sel)?.total||0} llamadas
+                    <button onClick={()=>setSel([])} style={{ marginLeft:8, color, background:'none', border:'none', cursor:'pointer', fontSize:11, fontWeight:700 }}>× Limpiar</button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {mA && mB ? (
+            <div>
+              {/* KPI cards */}
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:14 }}>
+                {[{m:mA,label:labelA,color:C.navy,bg:'#f0f7ff'},{m:mB,label:labelB,color:C.orange,bg:'#fff8f0'}].map((s,si) => (
+                  <div key={si} style={{ background:s.bg, borderRadius:12, padding:'16px 18px', border:`1px solid ${s.color}25` }}>
+                    <div style={{ fontWeight:800, color:s.color, marginBottom:10, fontSize:13 }}>
+                      {si===0?'🔵':'🟠'} {s.label}
+                    </div>
+                    <div style={{ display:'flex', gap:16, flexWrap:'wrap' }}>
+                      {[
+                        {l:'Total',     v:s.m.total},
+                        {l:'Completas', v:s.m.enviados},
+                        {l:'Colgadas',  v:s.m.colgadas},
+                        {l:'⌀ Dur.',    v:fmtSec(s.m.avgDur)},
+                      ].map((x,i)=>(
+                        <div key={i}>
+                          <div style={{fontSize:10,color:C.textMuted,fontWeight:600,textTransform:'uppercase'}}>{x.l}</div>
+                          <div style={{fontSize:20,fontWeight:800,color:s.color,fontFamily:"'IBM Plex Mono',monospace"}}>{x.v}</div>
+                        </div>
+                      ))}
+                    </div>
+                    {si===1 && (()=>{
+                      const dTot = mB.total    - mA.total;
+                      const dDur = Number(mB.avgDur) - Number(mA.avgDur);
+                      const badge = (val,unit) => (
+                        <span style={{fontSize:11,fontWeight:700,color:val>0?C.orange:'#27ae60',background:val>0?'#fff0ed':'#edfff4',borderRadius:20,padding:'2px 9px'}}>
+                          {val>0?'▲':'▼'} {unit==='s'?fmtSec(Math.abs(val)):Math.abs(val)}
+                        </span>
+                      );
+                      return (
+                        <div style={{marginTop:10,paddingTop:8,borderTop:`1px solid ${C.borderLight}`,display:'flex',gap:8,flexWrap:'wrap'}}>
+                          <span style={{fontSize:11,color:C.textMuted,fontWeight:600}}>Δ vs A:</span>
+                          {badge(dTot,'n')} llamadas
+                          {badge(dDur,'s')} duración
+                        </div>
+                      );
+                    })()}
+                  </div>
+                ))}
+              </div>
+
+              {/* Chart: duración promedio por flujo */}
+              <div style={{ background:C.white, borderRadius:12, padding:'18px 20px', boxShadow:'0 2px 10px rgba(0,0,0,0.06)', border:`1px solid ${C.borderLight}`, marginBottom:12 }}>
+                <div style={{ fontWeight:700, color:C.navy, marginBottom:4, fontSize:13 }}>⏱️ Duración promedio por flujo</div>
+                <div style={{ fontSize:11, color:C.textMuted, marginBottom:14 }}>Segundos promedio en voicebot por flujo de destino</div>
+                <ResponsiveContainer width="100%" height={240}>
+                  <BarChart data={chartData} margin={{bottom:30}}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f0f4f8"/>
+                    <XAxis dataKey="flow" tick={{fontSize:9,fill:C.textMuted}} angle={-20} textAnchor="end" interval={0}/>
+                    <YAxis tick={{fontSize:9,fill:C.textMuted}} tickFormatter={v=>fmtSec(v)}/>
+                    <Tooltip formatter={(v,n)=>[fmtSec(v),n]}/>
+                    <Legend iconType="circle" iconSize={8} wrapperStyle={{fontSize:10}}/>
+                    <Bar dataKey={labelA} fill={C.navy}   radius={[3,3,0,0]}/>
+                    <Bar dataKey={labelB} fill={C.orange} radius={[3,3,0,0]}/>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+
+              {/* Chart: llamadas por flujo */}
+              <div style={{ background:C.white, borderRadius:12, padding:'18px 20px', boxShadow:'0 2px 10px rgba(0,0,0,0.06)', border:`1px solid ${C.borderLight}`, marginBottom:12 }}>
+                <div style={{ fontWeight:700, color:C.navy, marginBottom:4, fontSize:13 }}>📞 Llamadas por flujo</div>
+                <div style={{ fontSize:11, color:C.textMuted, marginBottom:14 }}>Volumen de llamadas en cada flujo de destino</div>
+                <ResponsiveContainer width="100%" height={200}>
+                  <BarChart data={fcData.map(d=>({flow:d.flow.length>20?d.flow.slice(0,20)+'…':d.flow,[labelA]:d.countA,[labelB]:d.countB}))} margin={{bottom:30}}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f0f4f8"/>
+                    <XAxis dataKey="flow" tick={{fontSize:9,fill:C.textMuted}} angle={-20} textAnchor="end" interval={0}/>
+                    <YAxis tick={{fontSize:9,fill:C.textMuted}}/>
+                    <Tooltip/><Legend iconType="circle" iconSize={8} wrapperStyle={{fontSize:10}}/>
+                    <Bar dataKey={labelA} fill={C.navyMid} radius={[3,3,0,0]}/>
+                    <Bar dataKey={labelB} fill="#f08040"   radius={[3,3,0,0]}/>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+
+              {/* Table */}
+              <div style={{ background:C.white, borderRadius:12, padding:'18px 20px', boxShadow:'0 2px 10px rgba(0,0,0,0.06)', border:`1px solid ${C.borderLight}` }}>
+                <div style={{ fontWeight:700, color:C.navy, marginBottom:14, fontSize:13 }}>📋 Tabla comparativa — Flujos de destino</div>
+                <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+                  <thead>
+                    <tr style={{ background:'#f5f8ff' }}>
+                      {['Flujo',`🔵 ${labelA} — Calls`,`🔵 ${labelA} — ⌀ Dur`,`🟠 ${labelB} — Calls`,`🟠 ${labelB} — ⌀ Dur`,'Δ Llamadas','Δ Duración'].map(h=>(
+                        <th key={h} style={{padding:'8px 12px',textAlign:'left',color:C.textMuted,fontWeight:600,borderBottom:`1px solid ${C.borderLight}`,fontSize:11,whiteSpace:'nowrap'}}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {fcData.map((d,i)=>{
+                      const dCnt = d.countB - d.countA;
+                      const dDur = d.durB   - d.durA;
+                      const badge = (val,unit) => val===0 ? <span style={{color:C.textMuted}}>—</span> : (
+                        <span style={{fontSize:11,fontWeight:700,color:val>0?C.orange:'#27ae60',background:val>0?'#fff0ed':'#edfff4',borderRadius:20,padding:'2px 8px'}}>
+                          {val>0?'▲':'▼'} {unit==='s'?fmtSec(Math.abs(val)):Math.abs(val)}
+                        </span>
+                      );
+                      return (
+                        <tr key={i} style={{borderBottom:`1px solid ${C.borderLight}`}}
+                          onMouseEnter={e=>e.currentTarget.style.background='#f5f8ff'}
+                          onMouseLeave={e=>e.currentTarget.style.background='white'}>
+                          <td style={{padding:'8px 12px',color:C.textSub,fontWeight:600}}>{d.flow}</td>
+                          <td style={{padding:'8px 12px',fontFamily:"'IBM Plex Mono',monospace",color:C.navy}}>{d.countA}</td>
+                          <td style={{padding:'8px 12px',fontFamily:"'IBM Plex Mono',monospace",color:C.navyMid,fontWeight:700}}>{d.durA?fmtSec(d.durA):'—'}</td>
+                          <td style={{padding:'8px 12px',fontFamily:"'IBM Plex Mono',monospace",color:C.orange}}>{d.countB}</td>
+                          <td style={{padding:'8px 12px',fontFamily:"'IBM Plex Mono',monospace",color:C.orange,fontWeight:700}}>{d.durB?fmtSec(d.durB):'—'}</td>
+                          <td style={{padding:'8px 12px'}}>{badge(dCnt,'n')}</td>
+                          <td style={{padding:'8px 12px'}}>{badge(dDur,'s')}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : (
+            <div style={{textAlign:'center',padding:40,color:C.textMuted,background:C.white,borderRadius:12,border:`1px solid ${C.borderLight}`}}>
+              <div style={{fontSize:36,marginBottom:10}}>⚖️</div>
+              <div style={{fontWeight:600}}>Selecciona fechas en Rango A y Rango B para comparar</div>
+              <div style={{fontSize:12,marginTop:6}}>Puedes seleccionar uno o varios días en cada rango</div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
+
 
 // ─── REGIONAL PANEL ───────────────────────────────────────────────────────────
 function RegionalPanel({ metrics }) {
@@ -1646,7 +1875,7 @@ function IVRDashboard() {
 
   useEffect(() => {
     try {
-      const stored = JSON.parse(localStorage.getItem("ivr_placa_v3") || "null");
+      const stored = JSON.parse(localStorage.getItem("ivr_placa_v4") || "null");
       if (stored) {
         const hist = stored.hist || [];
         const latest = stored.latest || {};
@@ -1677,7 +1906,7 @@ function IVRDashboard() {
     try {
       const latestByCountry = {};
       [...newHistory].reverse().forEach(h => { if (!latestByCountry[h.country]) latestByCountry[h.country] = h; });
-      localStorage.setItem("ivr_placa_v3", JSON.stringify({ hist: newHistory, latest: latestByCountry }));
+      localStorage.setItem("ivr_placa_v4", JSON.stringify({ hist: newHistory, latest: latestByCountry }));
     } catch {}
 
     const dc = days.length;
@@ -1691,7 +1920,7 @@ function IVRDashboard() {
     setMetrics({ PA: null, CR: null });
     setHistory([]);
     setTab("regional");
-    try { localStorage.removeItem("ivr_placa_v3"); } catch {}
+    try { localStorage.removeItem("ivr_placa_v4"); } catch {}
     setTimeout(() => window.location.reload(), 300);
   }, []);
 
